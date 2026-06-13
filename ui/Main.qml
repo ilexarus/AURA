@@ -821,19 +821,34 @@ ApplicationWindow {
                             AppTextField {
                                 id: stepValue
                                 Layout.fillWidth: true
-                                implicitHeight: 40
+                                Layout.preferredHeight: 40
+                                Layout.alignment: Qt.AlignBottom
                                 text: actionCard.value
                                 placeholderText: editor.actionHint(stepType.currentValue)
                                 onTextEdited: actionModel.setProperty(actionCard.index, "value", text)
                             }
 
                             ColumnLayout {
+                                Layout.preferredWidth: 82
+                                Layout.minimumWidth: 82
+                                Layout.maximumWidth: 82
+                                Layout.alignment: Qt.AlignBottom
                                 spacing: 2
-                                Text { text: "Пауза"; color: root.textMuted; font.pixelSize: 9 }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 12
+                                    Layout.leftMargin: 3
+                                    text: "Пауза"
+                                    color: root.textMuted
+                                    font.pixelSize: 9
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+
                                 AppTextField {
                                     id: stepDelay
-                                    Layout.preferredWidth: 72
-                                    implicitHeight: 40
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
                                     text: String(actionCard.delay_after)
                                     placeholderText: "0"
                                     inputMethodHints: Qt.ImhFormattedNumbersOnly
@@ -859,17 +874,35 @@ ApplicationWindow {
                     anchors.rightMargin: 11
                     Text {
                         Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignVCenter
                         text: "Запрашивать подтверждение"
                         color: root.textMain
                         font.pixelSize: 13
+                        verticalAlignment: Text.AlignVCenter
                     }
                     Switch {
                         id: confirmSwitch
+                        Layout.preferredWidth: 46
+                        Layout.preferredHeight: 32
+                        Layout.alignment: Qt.AlignVCenter
+                        padding: 0
+                        leftPadding: 0
+                        rightPadding: 0
+                        topPadding: 0
+                        bottomPadding: 0
+                        spacing: 0
+
                         indicator: Rectangle {
-                            implicitWidth: 42; implicitHeight: 24; radius: 12
+                            width: 42
+                            height: 24
+                            radius: 12
+                            x: Math.round((confirmSwitch.width - width) / 2)
+                            y: Math.round((confirmSwitch.height - height) / 2)
                             color: confirmSwitch.checked ? root.accent : "#303747"
                             Rectangle {
-                                width: 18; height: 18; radius: 9
+                                width: 18
+                                height: 18
+                                radius: 9
                                 x: confirmSwitch.checked ? parent.width - width - 3 : 3
                                 y: 3
                                 color: "white"
@@ -877,6 +910,7 @@ ApplicationWindow {
                             }
                         }
                         contentItem: Item {}
+                        background: Item {}
                     }
                 }
             }
