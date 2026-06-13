@@ -1,0 +1,9 @@
+{
+  "enabled": false,
+  "provider": "github",
+  "repository": "YOUR_GITHUB_USERNAME/YOUR_REPOSITORY",
+  "check_interval_hours": 12,
+  "auto_download": true,
+  "asset_name_template": "AURA-Setup-{version}.exe",
+  "checksum_name_template": "AURA-Setup-{version}.exe.sha256"
+}
