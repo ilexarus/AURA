@@ -21,6 +21,8 @@ ApplicationWindow {
     property color textMain: "#F5F7FB"
     property color textMuted: "#8F99AA"
     property var editingCommand: null
+    property var recordedActions: null
+    property var recordingDraft: null
 
     font.family: "Segoe UI"
 
@@ -48,9 +50,9 @@ ApplicationWindow {
 
     component AccentButton: Button {
         id: control
-        implicitHeight: 44
-        leftPadding: 20
-        rightPadding: 20
+        implicitHeight: 42
+        leftPadding: 18
+        rightPadding: 18
         font.pixelSize: 14
         font.weight: Font.DemiBold
         contentItem: Text {
@@ -233,9 +235,9 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Rectangle {
                         width: 9; height: 9; radius: 5
-                        color: backend.listening ? "#43D17C" : "#536071"
+                        color: backend.recording ? "#FF9A62" : backend.listening ? "#43D17C" : backend.wakeListening ? root.accent : "#536071"
                         SequentialAnimation on opacity {
-                            running: backend.listening
+                            running: backend.listening || backend.recording
                             loops: Animation.Infinite
                             NumberAnimation { to: 0.25; duration: 550 }
                             NumberAnimation { to: 1; duration: 550 }
@@ -243,7 +245,7 @@ ApplicationWindow {
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: backend.listening ? "Микрофон активен" : "Готов к работе"
+                        text: backend.recording ? "Запись действий" : backend.listening ? "Микрофон активен" : backend.wakeListening ? "Жду фразу «Аура»" : "Готов к работе"
                         color: root.textMuted
                         font.pixelSize: 12
                     }
@@ -266,6 +268,29 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Text { text: "Добрый день"; color: root.textMain; font.pixelSize: 25; font.weight: Font.DemiBold }
                         Text { text: "Скажите команду или проверьте её текстом"; color: root.textMuted; font.pixelSize: 13; topPadding: 4 }
+                    }
+                    Rectangle {
+                        height: 36
+                        width: wakeText.width + 24
+                        radius: 11
+                        color: backend.wakeEnabled ? "#1E1932" : "#141925"
+                        border.color: backend.wakeEnabled ? "#4A3A82" : root.line
+                        Text {
+                            id: wakeText
+                            anchors.centerIn: parent
+                            text: "◉  «Аура»"
+                            color: backend.wakeEnabled ? root.accentSoft : root.textMuted
+                            font.pixelSize: 11
+                        }
+                        ToolTip.visible: wakeMouse.containsMouse
+                        ToolTip.text: backend.wakeEnabled ? "Выключить голосовую активацию" : "Включить голосовую активацию"
+                        MouseArea {
+                            id: wakeMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: backend.setWakeEnabled(!backend.wakeEnabled)
+                        }
                     }
                     Rectangle {
                         height: 36
@@ -387,7 +412,7 @@ ApplicationWindow {
                                 Layout.maximumWidth: 470
                                 horizontalAlignment: Text.AlignHCenter
                                 wrapMode: Text.WordWrap
-                                text: backend.transcript.length ? "«" + backend.transcript + "»" : "Нажмите кнопку и произнесите фразу"
+                                text: backend.transcript.length ? "«" + backend.transcript + "»" : "Скажите «Аура» или нажмите кнопку"
                                 color: root.textMuted
                                 font.pixelSize: 13
                             }
@@ -529,8 +554,8 @@ ApplicationWindow {
 
     Dialog {
         id: editor
-        width: 620
-        height: 680
+        width: Math.min(640, root.width - 48)
+        height: Math.min(720, root.height - 40)
         anchors.centerIn: parent
         modal: true
         dim: true
@@ -598,12 +623,18 @@ ApplicationWindow {
 
         onOpened: {
             var command = root.editingCommand
-            nameField.text = command ? command.name : ""
-            phrasesField.text = command ? command.phrases_text : ""
-            confirmSwitch.checked = command ? command.require_confirmation : false
+            var draft = root.recordingDraft
+            nameField.text = draft ? draft.name : (command ? command.name : "")
+            phrasesField.text = draft ? draft.phrases : (command ? command.phrases_text : "")
+            confirmSwitch.checked = draft ? draft.confirmation : (command ? command.require_confirmation : false)
             actionModel.clear()
 
-            if (command && command.actions && command.actions.length > 0) {
+            if (root.recordedActions && root.recordedActions.length > 0) {
+                for (var recordedIndex = 0; recordedIndex < root.recordedActions.length; ++recordedIndex) {
+                    var recordedStep = root.recordedActions[recordedIndex]
+                    addAction(recordedStep.action_type, recordedStep.value, recordedStep.delay_after)
+                }
+            } else if (command && command.actions && command.actions.length > 0) {
                 for (var i = 0; i < command.actions.length; ++i) {
                     var step = command.actions[i]
                     addAction(step.action_type, step.value, step.delay_after)
@@ -611,13 +642,15 @@ ApplicationWindow {
             } else {
                 addAction("open_url", "", 0)
             }
+            root.recordedActions = null
+            root.recordingDraft = null
             nameField.forceActiveFocus()
         }
 
         contentItem: ColumnLayout {
             anchors.fill: parent
             anchors.margins: 26
-            spacing: 13
+            spacing: 11
 
             RowLayout {
                 Layout.fillWidth: true
@@ -628,6 +661,9 @@ ApplicationWindow {
                 }
                 ToolButton {
                     id: closeEditorButton
+                    Layout.preferredWidth: 36
+                    Layout.preferredHeight: 36
+                    Layout.alignment: Qt.AlignVCenter
                     text: "×"
                     font.pixelSize: 24
                     onClicked: editor.close()
@@ -657,7 +693,24 @@ ApplicationWindow {
                     font.weight: Font.DemiBold
                 }
                 SoftButton {
-                    implicitHeight: 34
+                    Layout.preferredHeight: 36
+                    Layout.minimumWidth: 112
+                    Layout.alignment: Qt.AlignVCenter
+                    text: "●  Записать"
+                    onClicked: {
+                        root.recordingDraft = {
+                            "name": nameField.text,
+                            "phrases": phrasesField.text,
+                            "confirmation": confirmSwitch.checked
+                        }
+                        editor.close()
+                        backend.startRecording()
+                    }
+                }
+                SoftButton {
+                    Layout.preferredHeight: 36
+                    Layout.minimumWidth: 112
+                    Layout.alignment: Qt.AlignVCenter
                     text: "+  Добавить"
                     onClicked: editor.addAction("open_url", "", 0)
                 }
@@ -667,7 +720,7 @@ ApplicationWindow {
                 id: actionsList
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.minimumHeight: 238
+                Layout.minimumHeight: 210
                 clip: true
                 spacing: 10
                 model: actionModel
@@ -830,8 +883,13 @@ ApplicationWindow {
 
             RowLayout {
                 Layout.fillWidth: true
+                Layout.preferredHeight: 42
+                Layout.minimumHeight: 42
                 spacing: 10
                 SoftButton {
+                    Layout.preferredHeight: 42
+                    Layout.minimumWidth: 96
+                    Layout.alignment: Qt.AlignVCenter
                     visible: root.editingCommand !== null
                     text: "Удалить"
                     onClicked: {
@@ -840,8 +898,17 @@ ApplicationWindow {
                     }
                 }
                 Item { Layout.fillWidth: true }
-                SoftButton { text: "Отмена"; onClicked: editor.close() }
+                SoftButton {
+                    Layout.preferredHeight: 42
+                    Layout.minimumWidth: 96
+                    Layout.alignment: Qt.AlignVCenter
+                    text: "Отмена"
+                    onClicked: editor.close()
+                }
                 AccentButton {
+                    Layout.preferredHeight: 42
+                    Layout.minimumWidth: 112
+                    Layout.alignment: Qt.AlignVCenter
                     text: "Сохранить"
                     onClicked: {
                         var actions = []
@@ -957,6 +1024,26 @@ ApplicationWindow {
             updateDialog.availableVersion = version
             updateDialog.releaseNotes = notes
             updateDialog.open()
+        }
+        function onRecordingChanged() {
+            if (backend.recording) {
+                root.showMinimized()
+            } else if (root.recordingDraft !== null && root.recordedActions === null) {
+                root.showNormal()
+                root.raise()
+                root.requestActivate()
+            }
+        }
+        function onRecordingReady(actionsJson) {
+            try {
+                root.recordedActions = JSON.parse(actionsJson)
+            } catch (error) {
+                root.recordedActions = null
+            }
+            root.showNormal()
+            root.raise()
+            root.requestActivate()
+            editor.open()
         }
     }
 }

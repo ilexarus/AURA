@@ -57,6 +57,12 @@ def install_tray(app: QApplication, window: object, backend: AssistantBackend, i
 
     show_action = QAction("Открыть AURA", menu)
     listen_action = QAction("Начать слушать", menu)
+    wake_action = QAction("Активация фразой «Аура»", menu)
+    voice_action = QAction("Голосовые ответы", menu)
+    wake_action.setCheckable(True)
+    wake_action.setChecked(backend.wakeEnabled)
+    voice_action.setCheckable(True)
+    voice_action.setChecked(backend.voiceFeedbackEnabled)
     update_action = QAction("Проверить обновления", menu)
     exit_action = QAction("Выход", menu)
 
@@ -67,10 +73,16 @@ def install_tray(app: QApplication, window: object, backend: AssistantBackend, i
 
     show_action.triggered.connect(show_window)
     listen_action.triggered.connect(backend.toggleListening)
+    wake_action.toggled.connect(backend.setWakeEnabled)
+    voice_action.toggled.connect(backend.setVoiceFeedbackEnabled)
+    backend.wakeStateChanged.connect(lambda: wake_action.setChecked(backend.wakeEnabled))
+    backend.voiceStateChanged.connect(lambda: voice_action.setChecked(backend.voiceFeedbackEnabled))
     update_action.triggered.connect(backend.checkForUpdates)
     exit_action.triggered.connect(backend.quitApp)
     menu.addAction(show_action)
     menu.addAction(listen_action)
+    menu.addAction(wake_action)
+    menu.addAction(voice_action)
     menu.addSeparator()
     menu.addAction(update_action)
     menu.addSeparator()
@@ -100,6 +112,8 @@ def main() -> int:
         update_config_path=resource_path("update_config.json"),
         updater_path=exe_dir / "AURAUpdater.exe",
         application_path=Path(sys.executable).resolve() if getattr(sys, "frozen", False) else Path(__file__).resolve(),
+        wake_model_path=resource_path("models/vosk-model-small-ru-0.22"),
+        voice_assets_path=resource_path("assets/voice"),
     )
     app.aboutToQuit.connect(backend.shutdown)
 

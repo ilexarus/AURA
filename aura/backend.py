@@ -14,6 +14,8 @@ from PySide6.QtGui import QGuiApplication
 from .actions import ActionError, ActionExecutor
 from .engine import CommandMatcher
 from .models import ActionStep, VoiceCommand
+from .recorder import ActionRecorder
+from .settings import AssistantSettings, SettingsStore
 from .speech import SpeechWorker
 from .storage import CommandStore
 from .update_client import (
@@ -25,6 +27,10 @@ from .update_client import (
     load_config,
     update_cache_dir,
 )
+from .voice_assets import resolve_voice_file, voice_pack_is_ready
+from .voice_feedback import VoiceFeedbackWorker
+from .voice_utils import strip_leading_wake_phrase
+from .wakeword import WakeWordWorker
 
 try:
     import keyboard
@@ -77,6 +83,26 @@ class ExecutionWorker(QObject):
         except Exception as exc:
             logging.exception("Unexpected command execution failure")
             self.failed.emit(f"Непредвиденная ошибка: {exc}")
+        finally:
+            self.done.emit()
+
+
+class RecordingWorker(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+    done = Signal()
+
+    def __init__(self, recorder: ActionRecorder) -> None:
+        super().__init__()
+        self.recorder = recorder
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.finished.emit(self.recorder.run())
+        except Exception as exc:
+            logging.exception("Action recording failed")
+            self.failed.emit(str(exc))
         finally:
             self.done.emit()
 
@@ -142,10 +168,14 @@ class AssistantBackend(QObject):
     transcriptChanged = Signal()
     listeningChanged = Signal()
     busyChanged = Signal()
+    recordingChanged = Signal()
+    wakeStateChanged = Signal()
+    voiceStateChanged = Signal()
     historyChanged = Signal()
     updateStateChanged = Signal()
     confirmationRequested = Signal(str, str)
     updateReady = Signal(str, str)
+    recordingReady = Signal(str)
     hotkeyTriggered = Signal()
     stopHotkeyTriggered = Signal()
 
@@ -155,6 +185,8 @@ class AssistantBackend(QObject):
         update_config_path: Path,
         updater_path: Path,
         application_path: Path,
+        wake_model_path: Path,
+        voice_assets_path: Path,
     ) -> None:
         super().__init__()
         self.store = CommandStore()
@@ -164,17 +196,48 @@ class AssistantBackend(QObject):
         self.update_config_path = update_config_path
         self.updater_path = updater_path
         self.application_path = application_path
+        self.wake_model_path = Path(wake_model_path)
+        self.voice_assets_path = Path(voice_assets_path)
+
+        self._settings_store = SettingsStore(Path(self.store.path).parent)
+        self._settings: AssistantSettings = self._settings_store.load()
+
         self._status = "Готов к работе"
         self._transcript = ""
         self._listening = False
         self._busy = False
+        self._recording = False
         self._history: list[dict[str, str]] = []
         self._pending_command: VoiceCommand | None = None
         self._active_command: VoiceCommand | None = None
+
         self._speech_thread: QThread | None = None
         self._speech_worker: SpeechWorker | None = None
+        self._recognition_from_wake = False
         self._execution_thread: QThread | None = None
         self._execution_worker: ExecutionWorker | None = None
+        self._recording_thread: QThread | None = None
+        self._recording_worker: RecordingWorker | None = None
+        self._recorder: ActionRecorder | None = None
+
+        self._wake_enabled = bool(self._settings.wake_enabled)
+        self._wake_listening = False
+        self._wake_thread: QThread | None = None
+        self._wake_worker: WakeWordWorker | None = None
+        self._pending_listen = False
+        self._pending_recording = False
+        self._wake_error_shown = False
+        self._pending_captured_audio: dict[str, object] | None = None
+
+        self._voice_pack_ready = voice_pack_is_ready(self.voice_assets_path)
+        self._voice_enabled = bool(self._settings.voice_feedback_enabled and self._voice_pack_ready)
+        self._voice_speaking = False
+        self._voice_thread: QThread | None = None
+        self._voice_worker: VoiceFeedbackWorker | None = None
+        self._voice_after: object | None = None
+        self._voice_queue: list[tuple[str, object | None]] = []
+        self._execution_feedback_key = "done"
+
         self._hotkey_registered = False
         self._hotkey_handle = None
         self._stop_hotkey_handle = None
@@ -192,6 +255,7 @@ class AssistantBackend(QObject):
         self.hotkeyTriggered.connect(self.toggleListening)
         self.stopHotkeyTriggered.connect(self.stopExecution)
         QTimer.singleShot(350, self._register_hotkeys)
+        QTimer.singleShot(1400, self.startWakeListening)
         QTimer.singleShot(5000, self._automatic_update_check)
 
         self._update_timer = QTimer(self)
@@ -241,6 +305,30 @@ class AssistantBackend(QObject):
     def busy(self) -> bool:
         return self._busy
 
+    @Property(bool, notify=recordingChanged)
+    def recording(self) -> bool:
+        return self._recording
+
+    @Property(bool, notify=wakeStateChanged)
+    def wakeEnabled(self) -> bool:
+        return self._wake_enabled
+
+    @Property(bool, notify=wakeStateChanged)
+    def wakeListening(self) -> bool:
+        return self._wake_listening
+
+    @Property(str, notify=wakeStateChanged)
+    def wakePhrase(self) -> str:
+        return self._settings.wake_phrase
+
+    @Property(bool, notify=voiceStateChanged)
+    def voiceFeedbackEnabled(self) -> bool:
+        return self._voice_enabled
+
+    @Property(bool, notify=voiceStateChanged)
+    def voiceSpeaking(self) -> bool:
+        return self._voice_speaking
+
     @Property("QVariantList", notify=historyChanged)
     def history(self) -> list[dict[str, str]]:
         return self._history[:10]
@@ -267,15 +355,28 @@ class AssistantBackend(QObject):
 
     @Slot()
     def toggleListening(self) -> None:
-        if self._listening or self._busy:
+        if self._listening or self._busy or self._recording or self._voice_speaking:
             return
+        if self._wake_thread is not None:
+            self._pending_listen = True
+            self._stop_wake_listener()
+            return
+        self._start_speech_listening()
+
+    def _start_speech_listening(self, audio_payload: dict[str, object] | None = None) -> None:
+        if self._speech_thread is not None or self._busy or self._recording or self._voice_speaking:
+            return
+        self._recognition_from_wake = audio_payload is not None
         self._set_listening(True)
-        self._set_status("Слушаю…")
+        self._set_status("Распознаю команду…" if audio_payload is not None else "Слушаю…")
         self._transcript = ""
         self.transcriptChanged.emit()
 
         thread = QThread(self)
-        worker = SpeechWorker()
+        worker = SpeechWorker(
+            microphone_index=self._settings.microphone_index,
+            audio_payload=audio_payload,
+        )
         worker.moveToThread(thread)
         thread.started.connect(worker.listen_once)
         worker.recognized.connect(self._on_recognized)
@@ -288,14 +389,125 @@ class AssistantBackend(QObject):
         self._speech_worker = worker
         thread.start()
 
+    @Slot()
+    def startWakeListening(self) -> None:
+        if not self._wake_enabled or self._wake_thread is not None:
+            return
+        if self._listening or self._busy or self._recording or self._voice_speaking:
+            return
+        if not self.wake_model_path.is_dir():
+            if not self._wake_error_shown:
+                self._set_status("Голосовая активация недоступна: модель не найдена")
+                self._wake_error_shown = True
+            return
+
+        thread = QThread(self)
+        worker = WakeWordWorker(
+            model_path=self.wake_model_path,
+            wake_phrase=self._settings.wake_phrase,
+            microphone_index=self._settings.microphone_index,
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.activated.connect(self._on_wake_activated)
+        worker.commandCaptured.connect(self._on_wake_command_captured)
+        worker.commandFailed.connect(self._on_wake_command_error)
+        worker.failed.connect(self._on_wake_error)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._wake_thread_cleanup)
+        self._wake_thread = thread
+        self._wake_worker = worker
+        self._set_wake_listening(True)
+        thread.start()
+
+    @Slot(bool)
+    def setVoiceFeedbackEnabled(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if enabled and not self._voice_pack_ready:
+            self._set_status("Голосовой пакет не создан. Запустите GENERATE_SILERO_VOICE.cmd")
+            return
+        if self._voice_enabled == enabled:
+            return
+        self._voice_enabled = enabled
+        if not enabled:
+            self._voice_queue.clear()
+        self._settings.voice_feedback_enabled = enabled
+        self._save_settings()
+        self.voiceStateChanged.emit()
+        self._set_status("Голосовые ответы включены" if enabled else "Голосовые ответы выключены")
+
+    @Slot(bool)
+    def setWakeEnabled(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if enabled and not self.wake_model_path.is_dir():
+            self._set_status("Не найдена локальная модель активации")
+            return
+        if self._wake_enabled == enabled:
+            return
+        self._wake_enabled = enabled
+        self._settings.wake_enabled = enabled
+        self._save_settings()
+        self.wakeStateChanged.emit()
+        if enabled:
+            self._wake_error_shown = False
+            self._set_status(f"Активация фразой «{self._settings.wake_phrase.capitalize()}» включена")
+            QTimer.singleShot(150, self.startWakeListening)
+        else:
+            self._stop_wake_listener()
+            self._set_status("Голосовая активация выключена")
+
+    @Slot()
+    def startRecording(self) -> None:
+        if self._recording:
+            return
+        if self._busy or self._listening:
+            self._set_status("Сначала завершите текущее действие")
+            return
+        if self._wake_thread is not None:
+            self._pending_recording = True
+            self._stop_wake_listener()
+            return
+        self._start_recording_now()
+
+    def _start_recording_now(self) -> None:
+        if self._recording or self._busy or self._listening:
+            return
+        recorder = ActionRecorder()
+        thread = QThread(self)
+        worker = RecordingWorker(recorder)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_recording_finished)
+        worker.failed.connect(self._on_recording_failed)
+        worker.done.connect(thread.quit)
+        worker.done.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._recording_cleanup)
+        self._recorder = recorder
+        self._recording_thread = thread
+        self._recording_worker = worker
+        self._set_recording(True)
+        self._set_status("Записываю действия. Ctrl + Shift + F12 для завершения")
+        thread.start()
+        self._speak("recording_started")
+
+    @Slot()
+    def stopRecording(self) -> None:
+        if not self._recording or self._recorder is None:
+            return
+        self._set_status("Завершаю запись действий…")
+        self._recorder.stop()
+
     @Slot(str)
     def executeText(self, text: str) -> None:
         clean = text.strip()
         if not clean:
             self._set_status("Введите тестовую фразу")
             return
-        if self._busy:
-            self._set_status("Сначала дождитесь завершения текущей команды")
+        if self._busy or self._recording:
+            self._set_status("Сначала дождитесь завершения текущего действия")
             return
         self._transcript = clean
         self.transcriptChanged.emit()
@@ -361,13 +573,16 @@ class AssistantBackend(QObject):
         else:
             self._set_status("Действие отменено")
             self._add_history(command.name, "Отменено")
+            self._speak("cancelled", lambda: QTimer.singleShot(150, self.startWakeListening))
 
     @Slot()
     def stopExecution(self) -> None:
-        if not self._busy:
+        if self._recording:
+            self.stopRecording()
             return
-        self.executor.stop()
-        self._set_status("Останавливаю сценарий…")
+        if self._busy:
+            self.executor.stop()
+            self._set_status("Останавливаю сценарий…")
 
     @Slot()
     def openDataFolder(self) -> None:
@@ -394,8 +609,6 @@ class AssistantBackend(QObject):
             self._set_status("Компонент AURAUpdater.exe не найден")
             return
         try:
-            # Run the helper from the update cache. Windows locks running EXE files,
-            # so the installer must be free to replace the copy inside the app folder.
             helper = update_cache_dir() / f"AURAUpdater-{self._update_version or 'next'}.exe"
             shutil.copy2(self.updater_path, helper)
             subprocess.Popen(
@@ -426,12 +639,21 @@ class AssistantBackend(QObject):
     def shutdown(self) -> None:
         self._unregister_hotkeys()
         self.executor.stop()
+        self._voice_queue.clear()
+        self._stop_wake_listener()
+        if self._recorder is not None:
+            self._recorder.stop()
+        for thread in (self._wake_thread, self._recording_thread, self._voice_thread):
+            if thread is not None and thread.isRunning():
+                thread.quit()
+                thread.wait(1200)
 
     def _handle_transcript(self, text: str) -> None:
         match = self.matcher.find(text, self.store.all())
         if not match:
             self._set_status("Команда не найдена")
             self._add_history(text, "Не найдено")
+            self._speak("not_found", lambda: QTimer.singleShot(150, self.startWakeListening))
             return
         command = match.command
         if command.require_confirmation:
@@ -439,15 +661,24 @@ class AssistantBackend(QObject):
             self._set_status("Нужно подтверждение")
             details = "\n".join(f"{i}. {ACTION_LABELS.get(s.action_type, s.action_type)}: {s.value}" for i, s in enumerate(command.actions, 1))
             self.confirmationRequested.emit(command.name, details)
+            self._speak("confirmation")
             return
         self._execute(command)
 
     def _execute(self, command: VoiceCommand) -> None:
         if self._busy:
             return
+        self._stop_wake_listener()
         self._active_command = command
+        self._execution_feedback_key = "done"
         self._set_busy(True)
         self._set_status(f"Запускаю «{command.name}»")
+        self._speak("executing")
+        self._start_execution_worker(command)
+
+    def _start_execution_worker(self, command: VoiceCommand) -> None:
+        if not self._busy or self._active_command is not command or self._execution_thread is not None:
+            return
         thread = QThread(self)
         worker = ExecutionWorker(self.executor, command)
         worker.moveToThread(thread)
@@ -470,38 +701,201 @@ class AssistantBackend(QObject):
     @Slot(str)
     def _on_execution_finished(self, message: str) -> None:
         command = self._active_command
+        self._execution_feedback_key = "done"
         self._set_status(message)
         self._add_history(self._transcript or (command.name if command else "Команда"), command.name if command else "Выполнено")
 
     @Slot(str)
     def _on_execution_failed(self, message: str) -> None:
         command = self._active_command
+        self._execution_feedback_key = "failed"
         self._set_status(message)
         self._add_history(self._transcript or (command.name if command else "Команда"), f"Ошибка: {message}")
 
     @Slot()
     def _execution_cleanup(self) -> None:
+        feedback_key = self._execution_feedback_key
         self._execution_thread = None
         self._execution_worker = None
         self._active_command = None
-        self._set_busy(False)
+        self._speak(feedback_key, self._finish_execution_cleanup)
 
-    @Slot(str)
-    def _on_recognized(self, text: str) -> None:
-        self._transcript = text
+    def _finish_execution_cleanup(self) -> None:
+        self._set_busy(False)
+        QTimer.singleShot(180, self.startWakeListening)
+
+    @Slot(object)
+    def _on_recognized(self, payload: object) -> None:
+        if isinstance(payload, str):
+            alternatives = [payload]
+        elif isinstance(payload, list):
+            alternatives = [str(item).strip() for item in payload if str(item).strip()]
+        else:
+            alternatives = [str(payload).strip()] if str(payload).strip() else []
+
+        prepared: list[str] = []
+        for alternative in alternatives:
+            text = alternative
+            if self._recognition_from_wake:
+                text = strip_leading_wake_phrase(text, self._settings.wake_phrase)
+            if text and text not in prepared:
+                prepared.append(text)
+
+        if not prepared:
+            self._on_speech_error("Не удалось разобрать речь")
+            return
+
+        # Google's first alternative is not always the best command. Select the
+        # alternative that most closely matches the user's saved phrases.
+        selected = prepared[0]
+        best_score = -1.0
+        for alternative in prepared:
+            match = self.matcher.find(alternative, self.store.all())
+            if match is not None and match.score > best_score:
+                selected = alternative
+                best_score = match.score
+
+        self._transcript = selected
         self.transcriptChanged.emit()
-        self._handle_transcript(text)
+        self._handle_transcript(selected)
 
     @Slot(str)
     def _on_speech_error(self, message: str) -> None:
         self._set_status(message)
         self._add_history("Голосовой ввод", message)
+        self._speak("not_found", lambda: QTimer.singleShot(150, self.startWakeListening))
 
     @Slot()
     def _speech_finished(self) -> None:
         self._set_listening(False)
         self._speech_thread = None
         self._speech_worker = None
+        self._recognition_from_wake = False
+        if not self._busy and self._pending_command is None and not self._voice_speaking:
+            QTimer.singleShot(250, self.startWakeListening)
+
+    @Slot(object)
+    def _on_recording_finished(self, steps: object) -> None:
+        recorded = [step for step in steps if isinstance(step, ActionStep)] if isinstance(steps, list) else []
+        if not recorded:
+            self._set_status("Запись завершена без действий")
+            return
+        payload = json.dumps([step.to_dict() for step in recorded], ensure_ascii=False)
+        self._set_status(f"Записано действий: {len(recorded)}")
+        self.recordingReady.emit(payload)
+
+    @Slot(str)
+    def _on_recording_failed(self, message: str) -> None:
+        self._set_status(f"Не удалось записать действия: {message}")
+
+    @Slot()
+    def _recording_cleanup(self) -> None:
+        self._recording_thread = None
+        self._recording_worker = None
+        self._recorder = None
+        self._set_recording(False)
+        self._speak("recording_stopped", lambda: QTimer.singleShot(180, self.startWakeListening))
+
+    @Slot(str)
+    def _on_wake_activated(self, _recognized: str) -> None:
+        # The same microphone stream now continues capturing the command.
+        # No Windows notification sound is played, so it cannot leak into audio.
+        self._set_listening(True)
+        self._set_status("Слушаю команду…")
+
+    @Slot(object)
+    def _on_wake_command_captured(self, payload: object) -> None:
+        if isinstance(payload, dict):
+            self._pending_captured_audio = payload
+            self._set_status("Распознаю команду…")
+
+    @Slot(str)
+    def _on_wake_command_error(self, message: str) -> None:
+        self._pending_captured_audio = None
+        self._set_listening(False)
+        self._set_status(message)
+        self._add_history("Голосовая активация", message)
+
+    @Slot(str)
+    def _on_wake_error(self, message: str) -> None:
+        logging.warning("Wake-word listener error: %s", message)
+        if not self._wake_error_shown:
+            self._set_status(message)
+            self._wake_error_shown = True
+        self._wake_enabled = False
+        self._settings.wake_enabled = False
+        self._save_settings()
+        self.wakeStateChanged.emit()
+
+    @Slot()
+    def _wake_thread_cleanup(self) -> None:
+        self._wake_thread = None
+        self._wake_worker = None
+        self._set_wake_listening(False)
+        if self._pending_captured_audio is not None:
+            payload = self._pending_captured_audio
+            self._pending_captured_audio = None
+            QTimer.singleShot(0, lambda: self._start_speech_listening(payload))
+        elif self._pending_listen:
+            self._pending_listen = False
+            self._set_listening(False)
+            QTimer.singleShot(0, self._start_speech_listening)
+        elif self._pending_recording:
+            self._pending_recording = False
+            self._set_listening(False)
+            QTimer.singleShot(0, self._start_recording_now)
+        else:
+            self._set_listening(False)
+            if self._wake_enabled and not self._busy and not self._recording and not self._voice_speaking:
+                QTimer.singleShot(250, self.startWakeListening)
+
+    def _stop_wake_listener(self) -> None:
+        if self._wake_worker is not None:
+            self._wake_worker.stop()
+
+    def _speak(self, phrase_key: str, after: object | None = None) -> None:
+        if not self._voice_enabled:
+            if callable(after):
+                QTimer.singleShot(0, after)
+            return
+        if self._voice_speaking:
+            self._voice_queue.append((phrase_key, after))
+            return
+        path = resolve_voice_file(self.voice_assets_path, phrase_key)
+        if path is None:
+            logging.warning("Missing AURA voice asset: %s", phrase_key)
+            if callable(after):
+                QTimer.singleShot(0, after)
+            return
+
+        self._stop_wake_listener()
+        self._voice_after = after
+        self._set_voice_speaking(True)
+        thread = QThread(self)
+        worker = VoiceFeedbackWorker(path)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.failed.connect(lambda message: logging.warning("Voice feedback failed: %s", message))
+        worker.done.connect(thread.quit)
+        worker.done.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._voice_cleanup)
+        self._voice_thread = thread
+        self._voice_worker = worker
+        thread.start()
+
+    @Slot()
+    def _voice_cleanup(self) -> None:
+        callback = self._voice_after
+        self._voice_after = None
+        self._voice_thread = None
+        self._voice_worker = None
+        self._set_voice_speaking(False)
+        if callable(callback):
+            QTimer.singleShot(0, callback)
+        if self._voice_queue:
+            phrase_key, queued_callback = self._voice_queue.pop(0)
+            QTimer.singleShot(0, lambda: self._speak(phrase_key, queued_callback))
 
     def _safe_load_update_config(self) -> UpdateConfig:
         try:
@@ -511,7 +905,7 @@ class AssistantBackend(QObject):
             return UpdateConfig.from_dict({})
 
     def _automatic_update_check(self) -> None:
-        if self._busy or self._listening:
+        if self._busy or self._listening or self._recording:
             QTimer.singleShot(60_000, self._automatic_update_check)
             return
         self._start_update_check(manual=False)
@@ -552,11 +946,7 @@ class AssistantBackend(QObject):
         self._start_update_download_after_check(release)
 
     def _start_update_download_after_check(self, release: ReleaseInfo) -> None:
-        # The check thread owns the current worker. Start download after it finishes.
-        def begin() -> None:
-            self._start_update_download(release)
-
-        QTimer.singleShot(150, begin)
+        QTimer.singleShot(150, lambda: self._start_update_download(release))
 
     def _start_update_download(self, release: ReleaseInfo) -> None:
         if self._update_thread is not None:
@@ -608,17 +998,45 @@ class AssistantBackend(QObject):
         self._update_worker = None
         self._set_update_busy(False)
 
+    def _save_settings(self) -> None:
+        try:
+            self._settings_store.save(self._settings)
+        except OSError:
+            logging.exception("Unable to save settings")
+
     def _set_status(self, value: str) -> None:
         self._status = value
         self.statusChanged.emit()
 
     def _set_listening(self, value: bool) -> None:
+        if self._listening == value:
+            return
         self._listening = value
         self.listeningChanged.emit()
 
     def _set_busy(self, value: bool) -> None:
+        if self._busy == value:
+            return
         self._busy = value
         self.busyChanged.emit()
+
+    def _set_recording(self, value: bool) -> None:
+        if self._recording == value:
+            return
+        self._recording = value
+        self.recordingChanged.emit()
+
+    def _set_wake_listening(self, value: bool) -> None:
+        if self._wake_listening == value:
+            return
+        self._wake_listening = value
+        self.wakeStateChanged.emit()
+
+    def _set_voice_speaking(self, value: bool) -> None:
+        if self._voice_speaking == value:
+            return
+        self._voice_speaking = value
+        self.voiceStateChanged.emit()
 
     def _set_update_busy(self, value: bool) -> None:
         self._update_busy = value

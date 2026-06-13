@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ctypes
 import json
+import sys
 import threading
 import time
 from typing import Any
@@ -56,6 +58,7 @@ class ActionRecorder:
         self._modifiers: set[str] = set()
         self._handled_keys: set[str] = set()
         self._lock = threading.RLock()
+        self._active_window_title = ""
 
     def stop(self) -> None:
         self._stop.set()
@@ -101,6 +104,36 @@ class ActionRecorder:
         char = getattr(key, "char", None)
         return char if isinstance(char, str) and char else None
 
+    @staticmethod
+    def _foreground_window_title() -> str:
+        if not sys.platform.startswith("win"):
+            return ""
+        try:
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetForegroundWindow()
+            if not hwnd:
+                return ""
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return ""
+            buffer = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buffer, length + 1)
+            return buffer.value.strip()
+        except Exception:
+            return ""
+
+    def _maybe_append_active_window(self, timestamp: float) -> None:
+        title = self._foreground_window_title()
+        if not title or title == self._active_window_title:
+            return
+        self._active_window_title = title
+        if title.casefold().startswith("aura"):
+            return
+        # Window titles can contain a changing document suffix. Keep a practical,
+        # editable fragment while avoiding very long values.
+        value = title[:120]
+        self._append(timestamp, ActionStep("activate_window", value))
+
     def _on_press(self, key: Any) -> bool | None:
         now = time.monotonic()
         key_string = self._key_string(key)
@@ -119,7 +152,9 @@ class ActionRecorder:
             token = special or (char.lower() if char else key_string.replace("Key.", "").strip("'"))
             if self._modifiers.intersection({"ctrl", "alt", "win"}):
                 self._flush_text(now)
-                combo = "+".join(sorted(self._modifiers, key=lambda item: ["ctrl", "alt", "shift", "win"].index(item)) + [token])
+                self._maybe_append_active_window(now)
+                order = ["ctrl", "alt", "shift", "win"]
+                combo = "+".join(sorted(self._modifiers, key=order.index) + [token])
                 if combo not in self._handled_keys:
                     self._append(now, ActionStep("hotkey", combo))
                     self._handled_keys.add(combo)
@@ -127,16 +162,19 @@ class ActionRecorder:
 
             if char:
                 if not self._text_buffer:
+                    self._maybe_append_active_window(now)
                     self._text_started = now
                 self._text_buffer += char
                 return None
             if special == "space":
                 if not self._text_buffer:
+                    self._maybe_append_active_window(now)
                     self._text_started = now
                 self._text_buffer += " "
                 return None
             if special:
                 self._flush_text(now)
+                self._maybe_append_active_window(now)
                 self._append(now, ActionStep("key", special))
         return None
 
@@ -155,14 +193,30 @@ class ActionRecorder:
         now = time.monotonic()
         with self._lock:
             self._flush_text(now)
+            self._maybe_append_active_window(now)
             button_name = str(button).split(".")[-1]
-            value = json.dumps({"x": int(x), "y": int(y), "button": button_name, "clicks": 1}, ensure_ascii=False)
-            self._append(now, ActionStep("mouse_click", value))
+            payload = {"x": int(x), "y": int(y), "button": button_name, "clicks": 1}
+
+            if self._steps and self._steps[-1][1].action_type == "mouse_click":
+                previous_time, previous_step = self._steps[-1]
+                try:
+                    previous = json.loads(previous_step.value)
+                except (TypeError, json.JSONDecodeError):
+                    previous = {}
+                same_point = abs(int(previous.get("x", -9999)) - int(x)) <= 3 and abs(int(previous.get("y", -9999)) - int(y)) <= 3
+                if same_point and previous.get("button") == button_name and now - previous_time <= 0.45:
+                    previous["clicks"] = min(int(previous.get("clicks", 1)) + 1, 3)
+                    previous_step.value = json.dumps(previous, ensure_ascii=False)
+                    self._steps[-1] = (now, previous_step)
+                    return
+
+            self._append(now, ActionStep("mouse_click", json.dumps(payload, ensure_ascii=False)))
 
     def _on_scroll(self, _x: int, _y: int, _dx: int, dy: int) -> None:
         now = time.monotonic()
         with self._lock:
             self._flush_text(now)
+            self._maybe_append_active_window(now)
             self._append(now, ActionStep("mouse_scroll", str(int(dy))))
 
     def _finalize(self) -> list[ActionStep]:

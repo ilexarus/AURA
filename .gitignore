@@ -1,0 +1,14 @@
+.venv/
+build/
+dist/
+__pycache__/
+*.pyc
+launcher.log
+.idea/
+.vscode/
+models/*
+!models/.gitkeep
+.cache/
+assets/voice/*.wav
+assets/voice/voice_pack.json
+!assets/voice/.gitkeep

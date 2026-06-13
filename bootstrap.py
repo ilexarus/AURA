@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 VENV = ROOT / ".venv"
 LOG = ROOT / "launcher.log"
-REQUIRED_MODULES = ("PySide6", "speech_recognition", "pyautogui", "keyboard", "pyperclip")
+REQUIRED_MODULES = ("PySide6", "speech_recognition", "pyautogui", "keyboard", "pyperclip", "pynput", "vosk", "sounddevice")
 
 
 def write_log(message: str) -> None:
@@ -60,6 +60,18 @@ def setup_environment(reset: bool = False) -> Path:
         print("[AURA] Installing required components...")
         run([str(python), "-m", "pip", "install", "--disable-pip-version-check", "--upgrade", "pip"])
         run([str(python), "-m", "pip", "install", "--disable-pip-version-check", "-r", str(ROOT / "requirements-core.txt")])
+
+    model_marker = ROOT / "models" / "vosk-model-small-ru-0.22" / "am" / "final.mdl"
+    if not model_marker.is_file():
+        print("[AURA] Downloading local wake-word model...")
+        result = run([str(python), str(ROOT / "tools" / "download_wake_model.py")], check=False)
+        if result.returncode != 0:
+            print("[AURA] Wake phrase is unavailable. Button and hotkey modes will still work.")
+            if result.stdout:
+                lines = [line for line in result.stdout.splitlines() if line.strip()]
+                for line in lines[-8:]:
+                    print(f"[MODEL] {line}")
+            print("[AURA] Run REPAIR_VOICE_ACTIVATION.cmd after checking the internet connection.")
 
     voice_marker = VENV / ".aura_voice_unavailable"
     pyaudio_check = run([str(python), "-c", "import pyaudio"], check=False)

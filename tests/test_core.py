@@ -8,6 +8,7 @@ from pathlib import Path
 from aura.actions import ActionExecutor
 from aura.engine import CommandMatcher
 from aura.models import ActionStep, VoiceCommand
+from aura.recorder import ActionRecorder
 from aura.storage import CommandStore
 
 
@@ -68,6 +69,25 @@ class CoreTests(unittest.TestCase):
             backups = list(data_dir.glob("commands.broken-*.json"))
             self.assertEqual(len(backups), 1)
             self.assertEqual(backups[0].read_text(encoding="utf-8"), "{broken")
+
+
+    def test_recorder_merges_double_click(self) -> None:
+        recorder = ActionRecorder()
+        recorder._on_click(120, 240, "Button.left", True)
+        recorder._on_click(120, 240, "Button.left", True)
+        steps = recorder._finalize()
+        self.assertEqual(len(steps), 1)
+        payload = json.loads(steps[0].value)
+        self.assertEqual(payload["clicks"], 2)
+
+    def test_recorded_steps_keep_delays_editable(self) -> None:
+        recorder = ActionRecorder()
+        recorder._steps = [
+            (1.0, ActionStep("key", "enter")),
+            (2.25, ActionStep("type_text", "hello")),
+        ]
+        steps = recorder._finalize()
+        self.assertEqual(steps[0].delay_after, 1.25)
 
     def test_fuzzy_matching(self) -> None:
         command = VoiceCommand("Browser", ["открой браузер"], [ActionStep("open_url", "example.com")])
