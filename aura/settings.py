@@ -12,6 +12,9 @@ class AssistantSettings:
     wake_phrase: str = "аура"
     microphone_index: int | None = None
     voice_feedback_enabled: bool = True
+    first_run_completed: bool = False
+    autostart_enabled: bool = False
+    update_channel: str = "stable"
 
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> "AssistantSettings":
@@ -21,11 +24,17 @@ class AssistantSettings:
         except (TypeError, ValueError):
             microphone_index = None
         phrase = str(payload.get("wake_phrase") or "аура").strip()[:40] or "аура"
+        channel = str(payload.get("update_channel") or "stable").strip().lower()
+        if channel not in {"stable", "beta"}:
+            channel = "stable"
         return cls(
             wake_enabled=bool(payload.get("wake_enabled", True)),
             wake_phrase=phrase,
             microphone_index=microphone_index,
             voice_feedback_enabled=bool(payload.get("voice_feedback_enabled", True)),
+            first_run_completed=bool(payload.get("first_run_completed", True)),
+            autostart_enabled=bool(payload.get("autostart_enabled", False)),
+            update_channel=channel,
         )
 
 

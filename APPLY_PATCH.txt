@@ -1,6 +1,8 @@
-AURA 0.6.2 patch
+AURA 0.6.3 manual listening fix
 
 1. Close AURA.
-2. Copy all files from this folder into the root of the AURA source repository.
-3. Confirm replacement.
-4. Run START_AURA.cmd and test the checkbox and the per-step play button.
+2. Copy all files from this patch into the AURA project root.
+3. Confirm file replacement.
+4. Run START_AURA.cmd.
+
+The patch prevents silence and failed speech recognition from triggering the unknown-command voice response.

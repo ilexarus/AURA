@@ -70,3 +70,16 @@ def extract_google_alternatives(payload: object) -> list[str]:
             seen.add(key)
             unique.append(candidate.strip())
     return unique
+
+
+_SILENT_SPEECH_CAPTURE_ERRORS = frozenset({
+    "не услышал команду",
+    "не удалось разобрать речь",
+    "пустая запись команды",
+})
+
+
+def is_silent_speech_capture_error(message: str) -> bool:
+    """Return True when speech capture ended without a usable command."""
+    normalized = " ".join(str(message or "").casefold().split())
+    return normalized in _SILENT_SPEECH_CAPTURE_ERRORS

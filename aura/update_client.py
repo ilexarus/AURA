@@ -78,13 +78,23 @@ class ReleaseInfo:
     checksum_url: str
 
 
-def parse_version(value: str) -> tuple[int, int, int, int]:
+def parse_version(value: str) -> tuple[int, int, int, int, int, int]:
     clean = value.strip().lower().lstrip("v")
-    match = re.match(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?", clean)
+    match = re.match(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?(.*)$", clean)
     if not match:
         raise UpdateError(f"Некорректная версия: {value}")
-    numbers = [int(item or 0) for item in match.groups(default="0")]
-    return tuple(numbers)  # type: ignore[return-value]
+    major, minor, patch, build, suffix = match.groups(default="0")
+    numbers = [int(major or 0), int(minor or 0), int(patch or 0), int(build or 0)]
+    suffix = str(suffix or "").strip("-+._ ")
+    if not suffix:
+        stage_rank = 3  # A stable release is newer than rc, beta or alpha.
+        stage_number = 0
+    else:
+        stage_match = re.search(r"(alpha|a|beta|b|rc)[._-]?(\d*)", suffix)
+        stage_name = stage_match.group(1) if stage_match else "alpha"
+        stage_number = int(stage_match.group(2) or 0) if stage_match else 0
+        stage_rank = 2 if stage_name == "rc" else 1 if stage_name in {"beta", "b"} else 0
+    return (*numbers, stage_rank, stage_number)
 
 
 def is_newer(candidate: str, current: str) -> bool:
@@ -112,12 +122,34 @@ class GitHubUpdateClient:
     def __init__(self, config: UpdateConfig) -> None:
         self.config = config
 
-    def check(self, current_version: str) -> ReleaseInfo | None:
+    def check(self, current_version: str, include_prerelease: bool = False) -> ReleaseInfo | None:
         if not self.config.configured:
             return None
         owner_repo = self.config.repository.strip().strip("/")
-        url = f"https://api.github.com/repos/{owner_repo}/releases/latest"
-        payload = self._get_json(url)
+        if include_prerelease:
+            url = f"https://api.github.com/repos/{owner_repo}/releases?per_page=30"
+            releases = self._get_json_value(url)
+            if not isinstance(releases, list):
+                raise UpdateError("GitHub вернул неожиданный список выпусков")
+            candidates: list[tuple[tuple[int, int, int, int], dict[str, Any]]] = []
+            for item in releases:
+                if not isinstance(item, dict) or bool(item.get("draft", False)):
+                    continue
+                tag = str(item.get("tag_name") or "").strip()
+                version = tag.lstrip("vV")
+                try:
+                    parsed = parse_version(version)
+                except UpdateError:
+                    continue
+                if is_newer(version, current_version):
+                    candidates.append((parsed, item))
+            if not candidates:
+                return None
+            payload = max(candidates, key=lambda item: item[0])[1]
+        else:
+            url = f"https://api.github.com/repos/{owner_repo}/releases/latest"
+            payload = self._get_json(url)
+
         tag_name = str(payload.get("tag_name") or "").strip()
         candidate = tag_name.lstrip("vV")
         if not candidate or not is_newer(candidate, current_version):
@@ -166,12 +198,15 @@ class GitHubUpdateClient:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def _get_json(self, url: str) -> dict[str, Any]:
+    def _get_json_value(self, url: str) -> Any:
         raw = self._get_bytes(url, max_size=5 * 1024 * 1024)
         try:
-            payload = json.loads(raw.decode("utf-8"))
+            return json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise UpdateError("GitHub вернул некорректный ответ") from exc
+
+    def _get_json(self, url: str) -> dict[str, Any]:
+        payload = self._get_json_value(url)
         if not isinstance(payload, dict):
             raise UpdateError("GitHub вернул неожиданный формат ответа")
         return payload

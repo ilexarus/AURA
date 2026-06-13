@@ -71,7 +71,7 @@ def download_with_python(url: str, target: Path) -> None:
     request = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "AURA/0.6.1 (+https://github.com/ilexarus/AURA)",
+            "User-Agent": "AURA/0.7.0 (+https://github.com/ilexarus/AURA)",
             "Accept": "application/zip,application/octet-stream,*/*",
         },
     )

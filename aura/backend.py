@@ -6,11 +6,14 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Property, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QGuiApplication
+from PySide6.QtWidgets import QFileDialog
 
 from .actions import ActionError, ActionExecutor
 from .engine import CommandMatcher
@@ -19,6 +22,14 @@ from .recorder import ActionRecorder
 from .settings import AssistantSettings, SettingsStore
 from .speech import SpeechWorker
 from .storage import CommandStore
+from .system_tools import (
+    create_backup,
+    list_microphones,
+    prune_backups,
+    restore_backup,
+    set_autostart,
+    test_microphone,
+)
 from .update_client import (
     GitHubUpdateClient,
     ReleaseInfo,
@@ -30,7 +41,7 @@ from .update_client import (
 )
 from .voice_assets import resolve_voice_file, voice_pack_is_ready
 from .voice_feedback import VoiceFeedbackWorker
-from .voice_utils import strip_leading_wake_phrase
+from .voice_utils import strip_leading_wake_phrase, is_silent_speech_capture_error
 from .wakeword import WakeWordWorker
 
 try:
@@ -162,21 +173,118 @@ class RecordingWorker(QObject):
             self.done.emit()
 
 
+class MicrophoneTestWorker(QObject):
+    levelChanged = Signal(int)
+    finished = Signal(bool, str, int)
+    done = Signal()
+
+    def __init__(self, microphone_index: int | None) -> None:
+        super().__init__()
+        self.microphone_index = microphone_index
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            success, message, peak = test_microphone(
+                self.microphone_index,
+                on_level=self.levelChanged.emit,
+            )
+            self.finished.emit(success, message, peak)
+        except Exception as exc:
+            logging.exception("Microphone test failed")
+            self.finished.emit(False, f"Не удалось проверить микрофон: {exc}", 0)
+        finally:
+            self.done.emit()
+
+
+class DiagnosticsWorker(QObject):
+    finished = Signal(object)
+    done = Signal()
+
+    def __init__(
+        self,
+        data_dir: Path,
+        commands_path: Path,
+        wake_model_path: Path,
+        voice_assets_path: Path,
+        update_configured: bool,
+        hotkeys_ready: bool,
+    ) -> None:
+        super().__init__()
+        self.data_dir = Path(data_dir)
+        self.commands_path = Path(commands_path)
+        self.wake_model_path = Path(wake_model_path)
+        self.voice_assets_path = Path(voice_assets_path)
+        self.update_configured = update_configured
+        self.hotkeys_ready = hotkeys_ready
+
+    @Slot()
+    def run(self) -> None:
+        rows: list[dict[str, str]] = []
+
+        def add(name: str, ok: bool, details: str) -> None:
+            rows.append({
+                "name": name,
+                "status": "Готово" if ok else "Ошибка",
+                "details": details,
+                "tone": "success" if ok else "error",
+            })
+
+        try:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            probe = self.data_dir / ".diagnostic-write-test"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+            add("Папка данных", True, str(self.data_dir))
+        except OSError as exc:
+            add("Папка данных", False, str(exc))
+
+        try:
+            count = len(list_microphones()) - 1
+            add("Микрофоны", count > 0, f"Найдено устройств: {max(0, count)}")
+        except Exception as exc:
+            add("Микрофоны", False, str(exc))
+
+        add("Фраза активации", self.wake_model_path.is_dir(), "Локальная модель найдена" if self.wake_model_path.is_dir() else "Модель Vosk не найдена")
+        add("Голосовые ответы", voice_pack_is_ready(self.voice_assets_path), "Голосовой пакет готов" if voice_pack_is_ready(self.voice_assets_path) else "Голосовой пакет не создан")
+        add("Горячие клавиши", self.hotkeys_ready, "Ctrl+Shift+Space и Ctrl+Shift+F12" if self.hotkeys_ready else "Глобальные клавиши не зарегистрированы")
+        add("Обновления", self.update_configured, "Репозиторий настроен" if self.update_configured else "update_config.json не настроен")
+
+        try:
+            if self.commands_path.is_file():
+                json.loads(self.commands_path.read_text(encoding="utf-8"))
+            add("Файл команд", True, str(self.commands_path))
+        except (OSError, json.JSONDecodeError) as exc:
+            add("Файл команд", False, str(exc))
+
+        try:
+            request = urllib.request.Request("https://api.github.com", headers={"User-Agent": "AURA-Diagnostics/1.0"})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                ok = 200 <= int(getattr(response, "status", 200)) < 400
+            add("Интернет", ok, "GitHub доступен" if ok else "GitHub вернул ошибку")
+        except Exception as exc:
+            add("Интернет", False, str(exc))
+
+        self.finished.emit(rows)
+        self.done.emit()
+
+
 class UpdateCheckWorker(QObject):
     found = Signal(object)
     noUpdate = Signal()
     failed = Signal(str)
     done = Signal()
 
-    def __init__(self, client: GitHubUpdateClient, current_version: str) -> None:
+    def __init__(self, client: GitHubUpdateClient, current_version: str, include_prerelease: bool = False) -> None:
         super().__init__()
         self.client = client
         self.current_version = current_version
+        self.include_prerelease = include_prerelease
 
     @Slot()
     def run(self) -> None:
         try:
-            release = self.client.check(self.current_version)
+            release = self.client.check(self.current_version, include_prerelease=self.include_prerelease)
             if release:
                 self.found.emit(release)
             else:
@@ -237,6 +345,9 @@ class AssistantBackend(QObject):
     scenarioTestProgress = Signal(int, int, str)
     scenarioTestFinished = Signal(bool, str)
     testingStateChanged = Signal()
+    settingsChanged = Signal()
+    microphoneStateChanged = Signal()
+    diagnosticsChanged = Signal()
 
     def __init__(
         self,
@@ -260,6 +371,22 @@ class AssistantBackend(QObject):
 
         self._settings_store = SettingsStore(Path(self.store.path).parent)
         self._settings: AssistantSettings = self._settings_store.load()
+        self._data_dir = Path(self.store.path).parent
+        self._microphones = list_microphones()
+        available_indexes = {int(item.get("index", -1)) for item in self._microphones}
+        if self._settings.microphone_index is not None and self._settings.microphone_index not in available_indexes:
+            self._settings.microphone_index = None
+            self._save_settings()
+        self._microphone_testing = False
+        self._microphone_level = 0
+        self._microphone_test_message = ""
+        self._microphone_test_thread: QThread | None = None
+        self._microphone_test_worker: MicrophoneTestWorker | None = None
+        self._pending_microphone_test = False
+        self._diagnostics: list[dict[str, str]] = []
+        self._diagnostics_running = False
+        self._diagnostics_thread: QThread | None = None
+        self._diagnostics_worker: DiagnosticsWorker | None = None
 
         self._status = "Готов к работе"
         self._transcript = ""
@@ -424,6 +551,50 @@ class AssistantBackend(QObject):
     def updateVersion(self) -> str:
         return self._update_version
 
+    @Property(bool, notify=settingsChanged)
+    def firstRunCompleted(self) -> bool:
+        return bool(self._settings.first_run_completed)
+
+    @Property("QVariantList", notify=settingsChanged)
+    def microphones(self) -> list[dict[str, object]]:
+        return self._microphones
+
+    @Property(int, notify=settingsChanged)
+    def selectedMicrophoneIndex(self) -> int:
+        return -1 if self._settings.microphone_index is None else int(self._settings.microphone_index)
+
+    @Property(bool, notify=microphoneStateChanged)
+    def microphoneTesting(self) -> bool:
+        return self._microphone_testing
+
+    @Property(int, notify=microphoneStateChanged)
+    def microphoneLevel(self) -> int:
+        return self._microphone_level
+
+    @Property(str, notify=microphoneStateChanged)
+    def microphoneTestMessage(self) -> str:
+        return self._microphone_test_message
+
+    @Property(str, notify=settingsChanged)
+    def updateChannel(self) -> str:
+        return self._settings.update_channel
+
+    @Property(bool, notify=settingsChanged)
+    def autostartEnabled(self) -> bool:
+        return bool(self._settings.autostart_enabled)
+
+    @Property("QVariantList", notify=diagnosticsChanged)
+    def diagnostics(self) -> list[dict[str, str]]:
+        return self._diagnostics
+
+    @Property(bool, notify=diagnosticsChanged)
+    def diagnosticsRunning(self) -> bool:
+        return self._diagnostics_running
+
+    @Property(str, constant=True)
+    def backupFolder(self) -> str:
+        return str(self._data_dir / "backups")
+
     @Slot(str, result=str)
     def actionLabel(self, action_type: str) -> str:
         return ACTION_LABELS.get(action_type, action_type)
@@ -511,6 +682,7 @@ class AssistantBackend(QObject):
         self._settings.voice_feedback_enabled = enabled
         self._save_settings()
         self.voiceStateChanged.emit()
+        self.settingsChanged.emit()
         self._set_status("Голосовые ответы включены" if enabled else "Голосовые ответы выключены")
 
     @Slot(bool)
@@ -525,6 +697,7 @@ class AssistantBackend(QObject):
         self._settings.wake_enabled = enabled
         self._save_settings()
         self.wakeStateChanged.emit()
+        self.settingsChanged.emit()
         if enabled:
             self._wake_error_shown = False
             self._set_status(f"Активация фразой «{self._settings.wake_phrase.capitalize()}» включена")
@@ -532,6 +705,219 @@ class AssistantBackend(QObject):
         else:
             self._stop_wake_listener()
             self._set_status("Голосовая активация выключена")
+
+    @Slot()
+    def refreshMicrophones(self) -> None:
+        self._microphones = list_microphones()
+        self.settingsChanged.emit()
+
+    @Slot(int)
+    def setMicrophoneIndex(self, index: int) -> None:
+        requested = int(index)
+        available = {int(item.get("index", -1)) for item in self._microphones}
+        if requested not in available:
+            self._set_status("Выбранный микрофон больше недоступен")
+            return
+        value = None if requested < 0 else requested
+        if self._settings.microphone_index == value:
+            return
+        self._settings.microphone_index = value
+        self._save_settings()
+        self.settingsChanged.emit()
+        self._set_status("Микрофон изменён")
+        if self._wake_thread is not None:
+            self._stop_wake_listener()
+        else:
+            QTimer.singleShot(180, self.startWakeListening)
+
+    @Slot(str)
+    def setWakePhrase(self, phrase: str) -> None:
+        cleaned = " ".join(str(phrase or "").strip().casefold().split())[:40]
+        if not cleaned:
+            self._set_status("Введите фразу активации")
+            return
+        if cleaned == self._settings.wake_phrase:
+            return
+        self._settings.wake_phrase = cleaned
+        self._save_settings()
+        self.settingsChanged.emit()
+        self.wakeStateChanged.emit()
+        self._set_status(f"Фраза активации: «{cleaned.capitalize()}»")
+        if self._wake_thread is not None:
+            self._stop_wake_listener()
+        elif self._wake_enabled:
+            QTimer.singleShot(180, self.startWakeListening)
+
+    @Slot(str)
+    def setUpdateChannel(self, channel: str) -> None:
+        value = str(channel or "stable").strip().lower()
+        if value not in {"stable", "beta"}:
+            value = "stable"
+        if self._settings.update_channel == value:
+            return
+        self._settings.update_channel = value
+        self._save_settings()
+        self.settingsChanged.emit()
+        self._set_status("Канал обновлений: стабильный" if value == "stable" else "Канал обновлений: тестовый")
+        QTimer.singleShot(250, self._automatic_update_check)
+
+    @Slot(bool)
+    def setAutostartEnabled(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if getattr(sys, "frozen", False):
+            executable = self.application_path
+            arguments: list[str] = []
+        else:
+            executable = Path(sys.executable)
+            arguments = [str(self.application_path)]
+        success, message = set_autostart(enabled, executable, arguments)
+        if success:
+            self._settings.autostart_enabled = enabled
+            self._save_settings()
+            self.settingsChanged.emit()
+        self._set_status(message)
+
+    @Slot()
+    def completeFirstRun(self) -> None:
+        if self._settings.first_run_completed:
+            return
+        self._settings.first_run_completed = True
+        self._save_settings()
+        self.settingsChanged.emit()
+        self._set_status("Первичная настройка завершена")
+
+    @Slot()
+    def startMicrophoneTest(self) -> None:
+        if self._microphone_testing:
+            return
+        if self._busy or self._recording or self._listening:
+            self._set_status("Сначала завершите текущее действие")
+            return
+        if self._wake_thread is not None:
+            self._pending_microphone_test = True
+            self._stop_wake_listener()
+            return
+        self._start_microphone_test_now()
+
+    def _start_microphone_test_now(self) -> None:
+        if self._microphone_testing or self._microphone_test_thread is not None:
+            return
+        self._microphone_testing = True
+        self._microphone_level = 0
+        self._microphone_test_message = "Говорите обычным голосом…"
+        self.microphoneStateChanged.emit()
+        thread = QThread(self)
+        worker = MicrophoneTestWorker(self._settings.microphone_index)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.levelChanged.connect(self._on_microphone_level)
+        worker.finished.connect(self._on_microphone_test_finished)
+        worker.done.connect(thread.quit)
+        worker.done.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._microphone_test_cleanup)
+        self._microphone_test_thread = thread
+        self._microphone_test_worker = worker
+        self._set_status("Проверяю микрофон…")
+        thread.start()
+
+    @Slot(int)
+    def _on_microphone_level(self, level: int) -> None:
+        self._microphone_level = max(0, min(100, int(level)))
+        self.microphoneStateChanged.emit()
+
+    @Slot(bool, str, int)
+    def _on_microphone_test_finished(self, success: bool, message: str, peak: int) -> None:
+        self._microphone_level = max(self._microphone_level, int(peak))
+        self._microphone_test_message = message
+        self._set_status(message)
+        self.microphoneStateChanged.emit()
+
+    @Slot()
+    def _microphone_test_cleanup(self) -> None:
+        self._microphone_test_thread = None
+        self._microphone_test_worker = None
+        self._microphone_testing = False
+        self.microphoneStateChanged.emit()
+        QTimer.singleShot(220, self.startWakeListening)
+
+    @Slot()
+    def createBackup(self) -> None:
+        try:
+            target = create_backup(self._data_dir)
+            prune_backups(self._data_dir)
+            self._set_status(f"Резервная копия создана: {target.name}")
+            self.openBackupsFolder()
+        except OSError as exc:
+            self._set_status(f"Не удалось создать резервную копию: {exc}")
+
+    @Slot()
+    def openBackupsFolder(self) -> None:
+        folder = self._data_dir / "backups"
+        folder.mkdir(parents=True, exist_ok=True)
+        try:
+            self.executor.execute_step(ActionStep("open_path", str(folder)))
+        except ActionError as exc:
+            self._set_status(str(exc))
+
+    @Slot()
+    def restoreBackup(self) -> None:
+        folder = self._data_dir / "backups"
+        folder.mkdir(parents=True, exist_ok=True)
+        filename, _filter = QFileDialog.getOpenFileName(
+            None,
+            "Восстановить резервную копию AURA",
+            str(folder),
+            "AURA backup (*.zip)",
+        )
+        if not filename:
+            return
+        success, message = restore_backup(Path(filename), self._data_dir)
+        self._set_status(message)
+        if success:
+            self.settingsChanged.emit()
+
+    @Slot()
+    def runDiagnostics(self) -> None:
+        if self._diagnostics_running or self._diagnostics_thread is not None:
+            return
+        self._diagnostics_running = True
+        self._diagnostics = []
+        self.diagnosticsChanged.emit()
+        thread = QThread(self)
+        worker = DiagnosticsWorker(
+            data_dir=self._data_dir,
+            commands_path=Path(self.store.path),
+            wake_model_path=self.wake_model_path,
+            voice_assets_path=self.voice_assets_path,
+            update_configured=self._update_config.configured,
+            hotkeys_ready=self._hotkey_registered or not sys.platform.startswith("win"),
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_diagnostics_finished)
+        worker.done.connect(thread.quit)
+        worker.done.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._diagnostics_cleanup)
+        self._diagnostics_thread = thread
+        self._diagnostics_worker = worker
+        self._set_status("Проверяю AURA…")
+        thread.start()
+
+    @Slot(object)
+    def _on_diagnostics_finished(self, rows: object) -> None:
+        self._diagnostics = [item for item in rows if isinstance(item, dict)] if isinstance(rows, list) else []
+        failures = sum(1 for item in self._diagnostics if item.get("tone") == "error")
+        self._set_status("Диагностика завершена" if failures == 0 else f"Диагностика: найдено проблем {failures}")
+        self.diagnosticsChanged.emit()
+
+    @Slot()
+    def _diagnostics_cleanup(self) -> None:
+        self._diagnostics_thread = None
+        self._diagnostics_worker = None
+        self._diagnostics_running = False
+        self.diagnosticsChanged.emit()
 
     @Slot()
     def startRecording(self) -> None:
@@ -836,6 +1222,11 @@ class AssistantBackend(QObject):
             self._set_status("Компонент AURAUpdater.exe не найден")
             return
         try:
+            create_backup(self._data_dir)
+            prune_backups(self._data_dir)
+        except OSError:
+            logging.exception("Unable to create pre-update backup")
+        try:
             helper = update_cache_dir() / f"AURAUpdater-{self._update_version or 'next'}.exe"
             shutil.copy2(self.updater_path, helper)
             subprocess.Popen(
@@ -880,6 +1271,8 @@ class AssistantBackend(QObject):
             self._voice_thread,
             self._action_test_thread,
             self._scenario_test_thread,
+            self._microphone_test_thread,
+            self._diagnostics_thread,
         ):
             if thread is not None and thread.isRunning():
                 thread.quit()
@@ -998,9 +1391,13 @@ class AssistantBackend(QObject):
 
     @Slot(str)
     def _on_speech_error(self, message: str) -> None:
-        self._set_status(message)
-        self._add_history("Голосовой ввод", message)
-        self._speak("not_found", lambda: QTimer.singleShot(150, self.startWakeListening))
+        # Silence, a timeout or an unrecognisable fragment is not an unknown
+        # command. The not-found voice response is reserved for a real,
+        # non-empty transcript that did not match a saved command.
+        cleaned = str(message or "").strip() or "Не удалось распознать речь"
+        self._set_status(cleaned)
+        if not is_silent_speech_capture_error(cleaned):
+            self._add_history("Голосовой ввод", cleaned)
 
     @Slot()
     def _speech_finished(self) -> None:
@@ -1086,6 +1483,10 @@ class AssistantBackend(QObject):
             self._pending_action_test = None
             self._set_listening(False)
             QTimer.singleShot(0, lambda: self._start_action_test(*pending))
+        elif self._pending_microphone_test:
+            self._pending_microphone_test = False
+            self._set_listening(False)
+            QTimer.singleShot(0, self._start_microphone_test_now)
         else:
             self._set_listening(False)
             if self._wake_enabled and not self._busy and not self._recording and not self._voice_speaking:
@@ -1166,7 +1567,11 @@ class AssistantBackend(QObject):
         if manual:
             self._set_status("Проверяю обновления…")
         thread = QThread(self)
-        worker = UpdateCheckWorker(self._update_client, self.current_version)
+        worker = UpdateCheckWorker(
+            self._update_client,
+            self.current_version,
+            include_prerelease=self._settings.update_channel == "beta",
+        )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.found.connect(self._on_update_found)

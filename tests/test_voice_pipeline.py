@@ -7,6 +7,7 @@ from aura.voice_utils import (
     extract_google_alternatives,
     pcm_rms,
     strip_leading_wake_phrase,
+    is_silent_speech_capture_error,
 )
 
 
@@ -23,6 +24,11 @@ class VoicePipelineTests(unittest.TestCase):
     def test_pcm_rms(self) -> None:
         self.assertEqual(pcm_rms(b"\x00\x00" * 16), 0.0)
         self.assertGreater(pcm_rms((1000).to_bytes(2, "little", signed=True) * 16), 900.0)
+
+    def test_silence_is_not_treated_as_unknown_command(self) -> None:
+        self.assertTrue(is_silent_speech_capture_error("Не услышал команду"))
+        self.assertTrue(is_silent_speech_capture_error("Не удалось разобрать речь"))
+        self.assertFalse(is_silent_speech_capture_error("Сервис распознавания речи недоступен"))
 
     def test_google_alternative_parsing(self) -> None:
         payload = {

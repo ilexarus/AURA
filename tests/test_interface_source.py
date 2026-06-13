@@ -43,6 +43,27 @@ class InterfaceSourceTests(unittest.TestCase):
     def test_rejected_step_test_reports_result_to_qml(self) -> None:
         self.assertIn('self.actionTestResult.emit(index, False, message)', BACKEND)
 
+    def test_settings_center_and_first_run_wizard_are_present(self) -> None:
+        self.assertIn('id: settingsDialog', QML)
+        self.assertIn('id: firstRunDialog', QML)
+        self.assertIn('Проверить AURA', QML)
+        self.assertIn('backend.startMicrophoneTest()', QML)
+        self.assertIn('backend.createBackup()', QML)
+        self.assertIn('backend.setUpdateChannel', QML)
+
+    def test_backend_exposes_settings_and_diagnostics(self) -> None:
+        self.assertIn('def refreshMicrophones', BACKEND)
+        self.assertIn('def runDiagnostics', BACKEND)
+        self.assertIn('def completeFirstRun', BACKEND)
+        self.assertIn('def setAutostartEnabled', BACKEND)
+
+
+    def test_silent_manual_listen_does_not_play_not_found(self) -> None:
+        self.assertIn('is_silent_speech_capture_error', BACKEND)
+        speech_error = BACKEND.split('def _on_speech_error', 1)[1].split('def _speech_finished', 1)[0]
+        self.assertNotIn('_speak("not_found"', speech_error)
+
+
 
 if __name__ == "__main__":
     unittest.main()

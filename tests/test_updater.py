@@ -34,9 +34,11 @@ class FakeClient(GitHubUpdateClient):
 
 class UpdaterTests(unittest.TestCase):
     def test_version_comparison(self) -> None:
-        self.assertEqual(parse_version("v1.2.3"), (1, 2, 3, 0))
+        self.assertEqual(parse_version("v1.2.3"), (1, 2, 3, 0, 3, 0))
         self.assertTrue(is_newer("1.2.4", "1.2.3"))
         self.assertFalse(is_newer("1.2.3", "1.2.3"))
+        self.assertTrue(is_newer("1.2.3-beta2", "1.2.3-beta1"))
+        self.assertTrue(is_newer("1.2.3", "1.2.3-rc1"))
 
     def test_config_requires_real_repository(self) -> None:
         config = UpdateConfig.from_dict({
@@ -94,6 +96,40 @@ class UpdaterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             with self.assertRaises(UpdateError):
                 FakeClient(b"installer bytes", "0" * 64).download(release, Path(folder))
+
+    def test_beta_channel_can_select_prerelease(self) -> None:
+        config = UpdateConfig.from_dict({
+            "enabled": True,
+            "repository": "owner/aura",
+        })
+        client = GitHubUpdateClient(config)
+        releases = [
+            {
+                "tag_name": "v1.1.0-beta1",
+                "draft": False,
+                "prerelease": True,
+                "body": "Beta",
+                "assets": [
+                    {"name": "AURA-Setup-1.1.0-beta1.exe", "browser_download_url": "https://example.invalid/beta.exe"},
+                    {"name": "AURA-Setup-1.1.0-beta1.exe.sha256", "browser_download_url": "https://example.invalid/beta.sha256"},
+                ],
+            },
+            {
+                "tag_name": "v1.0.1",
+                "draft": False,
+                "prerelease": False,
+                "body": "Stable",
+                "assets": [
+                    {"name": "AURA-Setup-1.0.1.exe", "browser_download_url": "https://example.invalid/stable.exe"},
+                    {"name": "AURA-Setup-1.0.1.exe.sha256", "browser_download_url": "https://example.invalid/stable.sha256"},
+                ],
+            },
+        ]
+        client._get_json_value = lambda _url: releases  # type: ignore[method-assign]
+        release = client.check("1.0.0", include_prerelease=True)
+        self.assertIsNotNone(release)
+        self.assertEqual(release.version, "1.1.0-beta1")
+
 
 
 if __name__ == "__main__":

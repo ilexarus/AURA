@@ -99,6 +99,75 @@ ApplicationWindow {
         }
     }
 
+    component AuraSwitch: Switch {
+        id: control
+        implicitWidth: 48
+        implicitHeight: 28
+        indicator: Rectangle {
+            width: 44
+            height: 24
+            radius: 12
+            x: Math.round((control.width - width) / 2)
+            y: Math.round((control.height - height) / 2)
+            color: control.checked ? root.accent : "#303747"
+            border.color: control.checked ? "#9A85FF" : "#414A5C"
+            Rectangle {
+                width: 18
+                height: 18
+                radius: 9
+                x: control.checked ? parent.width - width - 3 : 3
+                y: 3
+                color: "white"
+                Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+            }
+        }
+        contentItem: Item {}
+        background: Item {}
+    }
+
+    component AuraCloseButton: ToolButton {
+        id: control
+        implicitWidth: 38
+        implicitHeight: 38
+        hoverEnabled: true
+        padding: 0
+        ToolTip.visible: hovered
+        ToolTip.text: "Закрыть"
+        ToolTip.delay: 450
+
+        background: Rectangle {
+            radius: 12
+            color: control.down ? "#2B3242" : control.hovered ? "#222938" : "transparent"
+            border.width: control.hovered ? 1 : 0
+            border.color: "#3A4458"
+            Behavior on color { ColorAnimation { duration: 120 } }
+        }
+
+        contentItem: Item {
+            Rectangle {
+                anchors.centerIn: parent
+                width: 15
+                height: 2
+                radius: 1
+                rotation: 45
+                color: control.hovered ? root.textMain : "#A7B0C1"
+                antialiasing: true
+                Behavior on color { ColorAnimation { duration: 120 } }
+            }
+            Rectangle {
+                anchors.centerIn: parent
+                width: 15
+                height: 2
+                radius: 1
+                rotation: -45
+                color: control.hovered ? root.textMain : "#A7B0C1"
+                antialiasing: true
+                Behavior on color { ColorAnimation { duration: 120 } }
+            }
+        }
+    }
+
+
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
@@ -268,6 +337,15 @@ ApplicationWindow {
                     onClicked: {
                         root.editingCommand = null
                         editor.open()
+                    }
+                }
+
+                SoftButton {
+                    Layout.fillWidth: true
+                    text: "⚙  Настройки"
+                    onClicked: {
+                        backend.refreshMicrophones()
+                        settingsDialog.open()
                     }
                 }
 
@@ -761,23 +839,24 @@ ApplicationWindow {
             anchors.margins: 26
             spacing: 11
 
-            RowLayout {
+            Item {
                 Layout.fillWidth: true
+                Layout.preferredHeight: 48
+
                 Column {
-                    Layout.fillWidth: true
+                    anchors.left: parent.left
+                    anchors.top: parent.top
                     Text { text: root.editingCommand ? "Редактировать команду" : "Новая команда"; color: root.textMain; font.pixelSize: 21; font.bold: true }
                     Text { text: "Программирование не требуется"; color: root.textMuted; font.pixelSize: 12; topPadding: 3 }
                 }
-                ToolButton {
-                    id: closeEditorButton
-                    Layout.preferredWidth: 36
-                    Layout.preferredHeight: 36
-                    Layout.alignment: Qt.AlignVCenter
-                    text: "×"
-                    font.pixelSize: 24
+
+                AuraCloseButton {
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    anchors.topMargin: -14
+                    anchors.rightMargin: -14
+                    z: 20
                     onClicked: editor.close()
-                    background: Rectangle { color: closeEditorButton.hovered ? "#202635" : "transparent"; radius: 10 }
-                    contentItem: Text { text: closeEditorButton.text; color: root.textMuted; font: closeEditorButton.font; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                 }
             }
 
@@ -1213,6 +1292,519 @@ ApplicationWindow {
                 }
             }
         }
+    }
+
+    Dialog {
+        id: settingsDialog
+        width: Math.min(780, root.width - 60)
+        height: Math.min(680, root.height - 50)
+        anchors.centerIn: parent
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+        padding: 0
+        property int microphoneComboIndex: 0
+
+        function findMicrophoneIndex(value) {
+            for (var i = 0; i < backend.microphones.length; ++i) {
+                if (Number(backend.microphones[i].index) === Number(value))
+                    return i
+            }
+            return 0
+        }
+
+        onOpened: {
+            backend.refreshMicrophones()
+            microphoneComboIndex = findMicrophoneIndex(backend.selectedMicrophoneIndex)
+        }
+
+        background: Rectangle { radius: 24; color: "#111621"; border.color: "#343C4D"; border.width: 1 }
+        Overlay.modal: Rectangle { color: "#B005070B" }
+
+        contentItem: ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 24
+            spacing: 15
+
+            Item {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 48
+
+                Column {
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    spacing: 3
+                    Text { text: "Настройки"; color: root.textMain; font.pixelSize: 22; font.weight: Font.DemiBold }
+                    Text { text: "AURA " + backend.version + "  •  все параметры сохраняются автоматически"; color: root.textMuted; font.pixelSize: 11 }
+                }
+
+                AuraCloseButton {
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    anchors.topMargin: -14
+                    anchors.rightMargin: -14
+                    z: 20
+                    onClicked: settingsDialog.close()
+                }
+            }
+
+            Flickable {
+                id: settingsScroll
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: width
+                contentHeight: settingsColumn.implicitHeight
+                boundsBehavior: Flickable.StopAtBounds
+
+                ColumnLayout {
+                    id: settingsColumn
+                    width: settingsScroll.width
+                    spacing: 12
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 164
+                        radius: 18
+                        color: "#151A25"
+                        border.color: root.line
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 17
+                            spacing: 10
+                            Text { text: "Микрофон"; color: root.textMain; font.pixelSize: 15; font.weight: Font.DemiBold }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 9
+                                ComboBox {
+                                    id: settingsMicCombo
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 42
+                                    model: backend.microphones
+                                    textRole: "name"
+                                    valueRole: "index"
+                                    currentIndex: settingsDialog.microphoneComboIndex
+                                    onActivated: {
+                                        backend.setMicrophoneIndex(currentValue)
+                                        settingsDialog.microphoneComboIndex = currentIndex
+                                    }
+                                    contentItem: Text {
+                                        leftPadding: 13
+                                        text: settingsMicCombo.displayText
+                                        color: root.textMain
+                                        verticalAlignment: Text.AlignVCenter
+                                        elide: Text.ElideRight
+                                        font.pixelSize: 12
+                                    }
+                                    background: Rectangle { radius: 12; color: "#0D111A"; border.color: settingsMicCombo.activeFocus ? root.accent : root.line }
+                                }
+                                SoftButton { text: "Обновить"; onClicked: backend.refreshMicrophones() }
+                                AccentButton {
+                                    text: backend.microphoneTesting ? "Слушаю…" : "Проверить"
+                                    enabled: !backend.microphoneTesting
+                                    onClicked: backend.startMicrophoneTest()
+                                }
+                            }
+                            ProgressBar {
+                                Layout.fillWidth: true
+                                from: 0; to: 100; value: backend.microphoneLevel
+                                background: Rectangle { implicitHeight: 7; radius: 4; color: "#282F3E" }
+                                contentItem: Item {
+                                    implicitHeight: 7
+                                    Rectangle { width: parent.width * backend.microphoneLevel / 100; height: 7; radius: 4; color: backend.microphoneLevel > 55 ? "#43D17C" : root.accent }
+                                }
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: backend.microphoneTestMessage.length ? backend.microphoneTestMessage : "Выберите устройство и нажмите «Проверить»"
+                                color: root.textMuted
+                                font.pixelSize: 11
+                                elide: Text.ElideRight
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 188
+                        radius: 18
+                        color: "#151A25"
+                        border.color: root.line
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 17
+                            spacing: 10
+                            Text { text: "Голос"; color: root.textMain; font.pixelSize: 15; font.weight: Font.DemiBold }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text { Layout.fillWidth: true; text: "Активация голосом"; color: root.textMain; font.pixelSize: 13 }
+                                AuraSwitch { checked: backend.wakeEnabled; onToggled: backend.setWakeEnabled(checked) }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+                                Text { text: "Фраза"; color: root.textMuted; font.pixelSize: 12 }
+                                AppTextField {
+                                    id: settingsWakePhrase
+                                    Layout.fillWidth: true
+                                    text: backend.wakePhrase
+                                    placeholderText: "Аура"
+                                    onEditingFinished: backend.setWakePhrase(text)
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text { Layout.fillWidth: true; text: "Голосовые ответы"; color: root.textMain; font.pixelSize: 13 }
+                                AuraSwitch { checked: backend.voiceFeedbackEnabled; onToggled: backend.setVoiceFeedbackEnabled(checked) }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 174
+                        radius: 18
+                        color: "#151A25"
+                        border.color: root.line
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 17
+                            spacing: 10
+                            Text { text: "Запуск и обновления"; color: root.textMain; font.pixelSize: 15; font.weight: Font.DemiBold }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+                                    Text { text: "Запускать вместе с Windows"; color: root.textMain; font.pixelSize: 13 }
+                                    Text { text: "AURA запускается свёрнутой в системный трей"; color: root.textMuted; font.pixelSize: 10 }
+                                }
+                                AuraSwitch { checked: backend.autostartEnabled; onToggled: backend.setAutostartEnabled(checked) }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text { text: "Канал обновлений"; color: root.textMain; font.pixelSize: 13 }
+                                Item { Layout.fillWidth: true }
+                                ComboBox {
+                                    id: channelCombo
+                                    Layout.preferredWidth: 190
+                                    Layout.preferredHeight: 40
+                                    model: ["Стабильный", "Тестовый"]
+                                    currentIndex: backend.updateChannel === "beta" ? 1 : 0
+                                    onActivated: backend.setUpdateChannel(currentIndex === 1 ? "beta" : "stable")
+                                    contentItem: Text { leftPadding: 12; text: channelCombo.displayText; color: root.textMain; verticalAlignment: Text.AlignVCenter; font.pixelSize: 12 }
+                                    background: Rectangle { radius: 12; color: "#0D111A"; border.color: root.line }
+                                }
+                                SoftButton { text: backend.updateBusy ? "Проверяю…" : "Проверить"; enabled: !backend.updateBusy; onClicked: backend.checkForUpdates() }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 142
+                        radius: 18
+                        color: "#151A25"
+                        border.color: root.line
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 17
+                            spacing: 10
+                            Text { text: "Резервные копии"; color: root.textMain; font.pixelSize: 15; font.weight: Font.DemiBold }
+                            Text { Layout.fillWidth: true; text: "Команды и настройки сохраняются в ZIP. AURA хранит восемь последних копий."; color: root.textMuted; font.pixelSize: 11; wrapMode: Text.WordWrap }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                AccentButton { text: "Создать копию"; onClicked: backend.createBackup() }
+                                SoftButton { text: "Восстановить"; onClicked: backend.restoreBackup() }
+                                SoftButton { text: "Открыть папку"; onClicked: backend.openBackupsFolder() }
+                                Item { Layout.fillWidth: true }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Math.max(150, 96 + diagnosticsRepeater.count * 54)
+                        radius: 18
+                        color: "#151A25"
+                        border.color: root.line
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 17
+                            spacing: 9
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text { Layout.fillWidth: true; text: "Диагностика"; color: root.textMain; font.pixelSize: 15; font.weight: Font.DemiBold }
+                                AccentButton {
+                                    text: backend.diagnosticsRunning ? "Проверяю…" : "Проверить AURA"
+                                    enabled: !backend.diagnosticsRunning
+                                    onClicked: backend.runDiagnostics()
+                                }
+                            }
+                            Text {
+                                visible: backend.diagnostics.length === 0
+                                Layout.fillWidth: true
+                                text: "Проверка микрофона, моделей, обновлений, горячих клавиш и файлов данных."
+                                color: root.textMuted
+                                font.pixelSize: 11
+                                wrapMode: Text.WordWrap
+                            }
+                            Repeater {
+                                id: diagnosticsRepeater
+                                model: backend.diagnostics
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 46
+                                    radius: 11
+                                    color: "#10151F"
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 12
+                                        anchors.rightMargin: 12
+                                        spacing: 10
+                                        Rectangle { width: 8; height: 8; radius: 4; color: modelData.tone === "success" ? "#43D17C" : "#FF6B72" }
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 1
+                                            Text { text: modelData.name; color: root.textMain; font.pixelSize: 12; font.weight: Font.DemiBold }
+                                            Text { Layout.fillWidth: true; text: modelData.details; color: root.textMuted; font.pixelSize: 9; elide: Text.ElideRight }
+                                        }
+                                        Text { text: modelData.status; color: modelData.tone === "success" ? "#62DB91" : "#FF878C"; font.pixelSize: 11 }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Connections {
+            target: backend
+            function onSettingsChanged() {
+                settingsDialog.microphoneComboIndex = settingsDialog.findMicrophoneIndex(backend.selectedMicrophoneIndex)
+            }
+        }
+    }
+
+    Dialog {
+        id: firstRunDialog
+        width: Math.min(650, root.width - 50)
+        height: Math.min(570, root.height - 45)
+        anchors.centerIn: parent
+        modal: true
+        closePolicy: Popup.NoAutoClose
+        padding: 0
+        property int step: 0
+        property int micIndex: 0
+
+        function findMicrophoneIndex(value) {
+            for (var i = 0; i < backend.microphones.length; ++i) {
+                if (Number(backend.microphones[i].index) === Number(value))
+                    return i
+            }
+            return 0
+        }
+
+        onOpened: {
+            backend.refreshMicrophones()
+            micIndex = findMicrophoneIndex(backend.selectedMicrophoneIndex)
+        }
+
+        background: Rectangle { radius: 26; color: "#111621"; border.color: "#4A3A82"; border.width: 1 }
+        Overlay.modal: Rectangle { color: "#D005070B" }
+
+        contentItem: ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 28
+            spacing: 16
+
+            RowLayout {
+                Layout.fillWidth: true
+                Rectangle {
+                    width: 42; height: 42; radius: 14
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: "#997FFF" }
+                        GradientStop { position: 1; color: "#6240E8" }
+                    }
+                    Text { anchors.centerIn: parent; text: "A"; color: "white"; font.pixelSize: 20; font.bold: true }
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+                    Text { text: "Первичная настройка AURA"; color: root.textMain; font.pixelSize: 20; font.weight: Font.DemiBold }
+                    Text { text: "Шаг " + (firstRunDialog.step + 1) + " из 5"; color: root.textMuted; font.pixelSize: 11 }
+                }
+                Row {
+                    spacing: 5
+                    Repeater {
+                        model: 5
+                        Rectangle { width: index === firstRunDialog.step ? 22 : 7; height: 7; radius: 4; color: index <= firstRunDialog.step ? root.accent : "#343B4B"; Behavior on width { NumberAnimation { duration: 150 } } }
+                    }
+                }
+            }
+
+            StackLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                currentIndex: firstRunDialog.step
+
+                ColumnLayout {
+                    spacing: 15
+                    Item { Layout.fillHeight: true }
+                    Text { Layout.alignment: Qt.AlignHCenter; text: "Добро пожаловать"; color: root.textMain; font.pixelSize: 28; font.weight: Font.DemiBold }
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: 500
+                        Layout.alignment: Qt.AlignHCenter
+                        text: "Мастер проверит микрофон, голосовую активацию и обновления. Настройки потом можно изменить в любое время."
+                        color: root.textMuted
+                        font.pixelSize: 14
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
+                    }
+                    Rectangle {
+                        Layout.alignment: Qt.AlignHCenter
+                        width: 250; height: 118; radius: 59
+                        gradient: Gradient {
+                            GradientStop { position: 0; color: "#282048" }
+                            GradientStop { position: 1; color: "#15182B" }
+                        }
+                        border.color: "#5F4BA5"
+                        Text { anchors.centerIn: parent; text: "Настроим за 2 минуты"; color: root.accentSoft; font.pixelSize: 15; font.weight: Font.DemiBold }
+                    }
+                    Item { Layout.fillHeight: true }
+                }
+
+                ColumnLayout {
+                    spacing: 13
+                    Text { text: "Выберите микрофон"; color: root.textMain; font.pixelSize: 20; font.weight: Font.DemiBold }
+                    Text { Layout.fillWidth: true; text: "AURA будет использовать это устройство для фразы активации и команд."; color: root.textMuted; font.pixelSize: 12; wrapMode: Text.WordWrap }
+                    ComboBox {
+                        id: wizardMicCombo
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 46
+                        model: backend.microphones
+                        textRole: "name"
+                        valueRole: "index"
+                        currentIndex: firstRunDialog.micIndex
+                        onActivated: { backend.setMicrophoneIndex(currentValue); firstRunDialog.micIndex = currentIndex }
+                        contentItem: Text { leftPadding: 14; text: wizardMicCombo.displayText; color: root.textMain; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight; font.pixelSize: 13 }
+                        background: Rectangle { radius: 13; color: "#0D111A"; border.color: root.line }
+                    }
+                    ProgressBar {
+                        Layout.fillWidth: true
+                        from: 0; to: 100; value: backend.microphoneLevel
+                        background: Rectangle { implicitHeight: 9; radius: 5; color: "#282F3E" }
+                        contentItem: Item { implicitHeight: 9; Rectangle { width: parent.width * backend.microphoneLevel / 100; height: 9; radius: 5; color: root.accent } }
+                    }
+                    Text { Layout.fillWidth: true; text: backend.microphoneTestMessage.length ? backend.microphoneTestMessage : "Нажмите кнопку и произнесите несколько слов"; color: root.textMuted; font.pixelSize: 11; wrapMode: Text.WordWrap }
+                    AccentButton { Layout.alignment: Qt.AlignHCenter; text: backend.microphoneTesting ? "Слушаю…" : "Проверить микрофон"; enabled: !backend.microphoneTesting; onClicked: backend.startMicrophoneTest() }
+                    Item { Layout.fillHeight: true }
+                }
+
+                ColumnLayout {
+                    spacing: 15
+                    Text { text: "Голосовая активация"; color: root.textMain; font.pixelSize: 20; font.weight: Font.DemiBold }
+                    Text { Layout.fillWidth: true; text: "Назовите короткую фразу. Рекомендуемый вариант: «Аура». Обнаружение выполняется локально."; color: root.textMuted; font.pixelSize: 12; wrapMode: Text.WordWrap }
+                    AppTextField { id: wizardWakePhrase; Layout.fillWidth: true; text: backend.wakePhrase; placeholderText: "Аура"; onEditingFinished: backend.setWakePhrase(text) }
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.preferredHeight: 58; radius: 14; color: "#151A25"; border.color: root.line
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 15
+                            anchors.rightMargin: 12
+                            Text { Layout.fillWidth: true; text: "Включить активацию голосом"; color: root.textMain; font.pixelSize: 13 }
+                            AuraSwitch { checked: backend.wakeEnabled; onToggled: backend.setWakeEnabled(checked) }
+                        }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.preferredHeight: 58; radius: 14; color: "#151A25"; border.color: root.line
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 15
+                            anchors.rightMargin: 12
+                            Text { Layout.fillWidth: true; text: "Озвучивать результат команд"; color: root.textMain; font.pixelSize: 13 }
+                            AuraSwitch { checked: backend.voiceFeedbackEnabled; onToggled: backend.setVoiceFeedbackEnabled(checked) }
+                        }
+                    }
+                    Item { Layout.fillHeight: true }
+                }
+
+                ColumnLayout {
+                    spacing: 15
+                    Text { text: "Запуск и обновления"; color: root.textMain; font.pixelSize: 20; font.weight: Font.DemiBold }
+                    Text { Layout.fillWidth: true; text: "Для большинства пользователей подходит стабильный канал. Тестовый получает новые версии раньше."; color: root.textMuted; font.pixelSize: 12; wrapMode: Text.WordWrap }
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.preferredHeight: 66; radius: 14; color: "#151A25"; border.color: root.line
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 15
+                            anchors.rightMargin: 12
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                Text { text: "Запускать с Windows"; color: root.textMain; font.pixelSize: 13 }
+                                Text { text: "Программа откроется свёрнутой в трей"; color: root.textMuted; font.pixelSize: 10 }
+                            }
+                            AuraSwitch { checked: backend.autostartEnabled; onToggled: backend.setAutostartEnabled(checked) }
+                        }
+                    }
+                    ComboBox {
+                        id: wizardChannel
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 46
+                        model: ["Стабильный канал", "Тестовый канал"]
+                        currentIndex: backend.updateChannel === "beta" ? 1 : 0
+                        onActivated: backend.setUpdateChannel(currentIndex === 1 ? "beta" : "stable")
+                        contentItem: Text { leftPadding: 14; text: wizardChannel.displayText; color: root.textMain; verticalAlignment: Text.AlignVCenter; font.pixelSize: 13 }
+                        background: Rectangle { radius: 13; color: "#0D111A"; border.color: root.line }
+                    }
+                    Item { Layout.fillHeight: true }
+                }
+
+                ColumnLayout {
+                    spacing: 15
+                    Item { Layout.fillHeight: true }
+                    Text { Layout.alignment: Qt.AlignHCenter; text: "AURA готова"; color: root.textMain; font.pixelSize: 28; font.weight: Font.DemiBold }
+                    Text { Layout.fillWidth: true; Layout.maximumWidth: 500; Layout.alignment: Qt.AlignHCenter; text: "Скажите «" + backend.wakePhrase.charAt(0).toUpperCase() + backend.wakePhrase.slice(1) + ", открой браузер» или создайте свою команду."; color: root.textMuted; font.pixelSize: 14; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap }
+                    Rectangle { Layout.alignment: Qt.AlignHCenter; width: 86; height: 86; radius: 43; color: "#201A38"; border.color: root.accent; Text { anchors.centerIn: parent; text: "✓"; color: "#8FE0AD"; font.pixelSize: 36; font.bold: true } }
+                    Item { Layout.fillHeight: true }
+                }
+            }
+
+            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.line }
+            RowLayout {
+                Layout.fillWidth: true
+                SoftButton { visible: firstRunDialog.step > 0; text: "Назад"; onClicked: firstRunDialog.step-- }
+                Item { Layout.fillWidth: true }
+                Text { visible: firstRunDialog.step === 1 && backend.microphoneLevel < 3; text: "Тест можно пропустить"; color: root.textMuted; font.pixelSize: 10 }
+                AccentButton {
+                    text: firstRunDialog.step === 4 ? "Начать работу" : "Далее"
+                    onClicked: {
+                        if (firstRunDialog.step === 4) {
+                            backend.completeFirstRun()
+                            firstRunDialog.close()
+                        } else {
+                            firstRunDialog.step++
+                        }
+                    }
+                }
+            }
+        }
+
+        Connections {
+            target: backend
+            function onSettingsChanged() {
+                firstRunDialog.micIndex = firstRunDialog.findMicrophoneIndex(backend.selectedMicrophoneIndex)
+            }
+        }
+    }
+
+    Timer {
+        interval: 650
+        running: !backend.firstRunCompleted
+        repeat: false
+        onTriggered: firstRunDialog.open()
     }
 
     Dialog {

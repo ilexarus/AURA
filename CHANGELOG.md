@@ -1,29 +1,39 @@
 # Changelog
 
+## 0.7.2
+
+- Перенесена кнопка закрытия настроек в настоящий верхний правый угол окна.
+- Аналогично исправлена кнопка закрытия редактора команд.
+- Кнопки больше не зависят от ширины заголовка и масштабирования Windows.
+
+## 0.7.0
+
+- Added a five-step first-run setup wizard.
+- Added a settings center without changing the main AURA visual style.
+- Added microphone selection and a live microphone level test.
+- Added editable wake phrase and voice-feedback settings.
+- Added per-user Windows autostart controls.
+- Added stable and beta update channels.
+- Added local backups and restore for commands and settings.
+- Added one-click diagnostics for the microphone, wake model, voice pack, hotkeys, updates, connectivity and command storage.
+- Added minimized startup support for Windows autostart.
+- Fixed manual listening so silence or unclear audio no longer plays the unknown-command response.
+- Preserved the 15-minute update check interval and all 0.6.x editor fixes.
+
+## 0.6.3
+
+- Fixed the manual “Начать говорить” mode treating silence as an unknown command.
+- Added a short microphone handoff delay when switching from wake listening.
+
 ## 0.6.2
 
 - Fixed persistence and visual state of the per-step “Включён” checkbox.
-- Removed the QML role-name collision between a step's enabled state and `Item.enabled`.
-- Fixed the “Проверить этот шаг” button so it remains clickable for disabled steps.
-- Individual step testing now relies on the backend to pause wake-word listening safely.
+- Fixed individual step testing for enabled and disabled steps.
 
-## 0.5.7
+## 0.6.1
 
-- Fixed the Windows-only double-click recorder unit test.
-- Removed the duplicate GitHub Actions workflow from the source package.
-- Added release concurrency protection.
-- Tests now run before the large PyTorch download and voice generation.
+- Fixed individual step testing and reduced the update interval to 15 minutes.
 
-# AURA 0.3.1
+## 0.6.0
 
-- Полностью сохранён прежний внешний вид основного окна.
-- В прежний редактор добавлены многошаговые сценарии без изменения общего стиля.
-- Добавлены паузы между действиями.
-- Выполнение перенесено в отдельный поток, поэтому интерфейс не зависает.
-- Старые команды AURA 0.1 и 0.2 автоматически преобразуются в новый формат.
-- Системные команды всегда требуют подтверждения.
-- Добавлен значок в системный трей.
-- Добавлена ротация журнала приложения.
-- Повреждённый файл команд сохраняется в резервную копию.
-- CMD-файлы используют ASCII и CRLF.
-- Добавлены portable-сборка и установщик Inno Setup.
+- Added scenario testing, action-card controls, search, recording overlay and improved history.

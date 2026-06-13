@@ -126,6 +126,8 @@ def main() -> int:
 
     window = engine.rootObjects()[0]
     tray = install_tray(app, window, backend, icon)
+    if "--minimized" in sys.argv:
+        window.hide()
     app._aura_tray = tray
     app._aura_backend = backend
     logging.info("AURA %s started", VERSION)

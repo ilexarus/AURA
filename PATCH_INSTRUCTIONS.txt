@@ -1,0 +1,7 @@
+AURA 0.7.0 upgrade patch
+
+1. Close AURA completely.
+2. Copy every file and folder from this patch into the root of your AURA repository.
+3. Confirm file replacement.
+4. Start START_AURA.cmd and verify Settings, microphone test and Diagnostics.
+5. Commit and publish tag v0.7.0 only after local testing.
