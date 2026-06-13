@@ -627,7 +627,9 @@ ApplicationWindow {
                 "action_type": type || "open_url",
                 "value": value || "",
                 "delay_after": Number(delayAfter || 0),
-                "enabled": enabled === undefined ? true : Boolean(enabled)
+                // The editor uses a dedicated role name because `enabled`
+                // collides with Item.enabled inside a QML delegate.
+                "step_enabled": enabled === undefined ? true : Boolean(enabled)
             })
         }
 
@@ -639,7 +641,7 @@ ApplicationWindow {
                     "action_type": item.action_type,
                     "value": item.value,
                     "delay_after": Number(item.delay_after || 0),
-                    "enabled": Boolean(item.enabled)
+                    "enabled": Boolean(item.step_enabled)
                 })
             }
             return actions
@@ -647,6 +649,16 @@ ApplicationWindow {
 
         function collectActionsJson() {
             return JSON.stringify(collectActions())
+        }
+
+        function testAction(index) {
+            if (index < 0 || index >= actionModel.count)
+                return
+            var item = actionModel.get(index)
+            root.testedStepIndex = index
+            root.testedStepState = "running"
+            root.testedStepMessage = "Проверяю…"
+            backend.testAction(index, String(item.action_type || ""), String(item.value || ""))
         }
 
         function duplicateAction(index) {
@@ -657,7 +669,7 @@ ApplicationWindow {
                 "action_type": item.action_type,
                 "value": item.value,
                 "delay_after": Number(item.delay_after || 0),
-                "enabled": Boolean(item.enabled)
+                "step_enabled": Boolean(item.step_enabled)
             })
         }
 
@@ -829,7 +841,8 @@ ApplicationWindow {
                     required property string action_type
                     required property string value
                     required property real delay_after
-                    property bool stepEnabled: model.enabled
+                    required property bool step_enabled
+                    readonly property bool stepEnabled: step_enabled
                     property bool testSelected: root.testedStepIndex === actionCard.index
                     width: actionsList.width - (actionsList.ScrollBar.vertical.visible ? 12 : 0)
                     height: 154
@@ -864,10 +877,10 @@ ApplicationWindow {
                                 Text {
                                     anchors.centerIn: parent
                                     text: actionCard.testSelected
-                                        ? (root.testedStepState === "success" ? "✓" : "!")
+                                        ? (root.testedStepState === "success" ? "✓" : root.testedStepState === "running" ? "…" : "!")
                                         : actionCard.index + 1
                                     color: actionCard.testSelected
-                                        ? (root.testedStepState === "success" ? "#62E39B" : "#FF8C99")
+                                        ? (root.testedStepState === "success" ? "#62E39B" : root.testedStepState === "running" ? "#9DD8FF" : "#FF8C99")
                                         : root.accentSoft
                                     font.pixelSize: 11
                                     font.bold: true
@@ -921,11 +934,16 @@ ApplicationWindow {
                                 id: testStepButton
                                 implicitWidth: 34
                                 implicitHeight: 34
-                                enabled: actionCard.stepEnabled && !backend.testingScenario && backend.testingActionIndex < 0
-                                text: backend.testingActionIndex === actionCard.index ? "…" : "▶"
+                                // A disabled step may still be tested manually. The backend
+                                // safely pauses wake-word listening before executing it.
+                                enabled: !backend.recording
+                                    && !backend.testingScenario
+                                    && backend.testingActionIndex < 0
+                                    && !(actionCard.testSelected && root.testedStepState === "running")
+                                text: backend.testingActionIndex === actionCard.index || (actionCard.testSelected && root.testedStepState === "running") ? "…" : "▶"
                                 ToolTip.visible: hovered
                                 ToolTip.text: "Проверить этот шаг"
-                                onClicked: backend.testAction(actionCard.index, stepType.currentValue, stepValue.text)
+                                onClicked: editor.testAction(actionCard.index)
                                 background: Rectangle { color: testStepButton.hovered ? "#222A39" : "transparent"; radius: 10 }
                                 contentItem: Text { text: testStepButton.text; color: testStepButton.enabled ? "#9DD8FF" : "#586273"; font.pixelSize: 13; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                             }
@@ -1012,9 +1030,12 @@ ApplicationWindow {
                             spacing: 8
                             CheckBox {
                                 id: stepEnabledCheck
-                                checked: actionCard.stepEnabled
+                                checked: actionCard.step_enabled
                                 text: "Включён"
-                                onToggled: actionModel.setProperty(actionCard.index, "enabled", checked)
+                                onToggled: {
+                                    actionModel.setProperty(actionCard.index, "step_enabled", checked)
+                                    root.testedStepIndex = -1
+                                }
                                 indicator: Rectangle {
                                     implicitWidth: 18
                                     implicitHeight: 18

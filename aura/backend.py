@@ -282,6 +282,7 @@ class AssistantBackend(QObject):
         self._testing_action_index = -1
         self._action_test_thread: QThread | None = None
         self._action_test_worker: ActionTestWorker | None = None
+        self._pending_action_test: tuple[int, str, str] | None = None
         self._testing_scenario = False
         self._scenario_test_thread: QThread | None = None
         self._scenario_test_worker: ScenarioTestWorker | None = None
@@ -325,7 +326,7 @@ class AssistantBackend(QObject):
         QTimer.singleShot(5000, self._automatic_update_check)
 
         self._update_timer = QTimer(self)
-        self._update_timer.setInterval(self._update_config.check_interval_hours * 60 * 60 * 1000)
+        self._update_timer.setInterval(self._update_config.check_interval_minutes * 60 * 1000)
         self._update_timer.timeout.connect(self._automatic_update_check)
         if self._update_config.configured:
             self._update_timer.start()
@@ -589,16 +590,44 @@ class AssistantBackend(QObject):
 
     @Slot(int, str, str)
     def testAction(self, index: int, action_type: str, value: str) -> None:
+        index = int(index)
+        action_type = str(action_type or "").strip()
+        value = str(value or "")
         if self._busy or self._recording or self._listening or self._testing_scenario or self._action_test_thread is not None:
-            self._set_status("Сначала завершите текущее действие")
+            message = "Сначала завершите текущее действие"
+            self._set_status(message)
+            # Always finish the UI request. Without this signal the step card
+            # remains forever in the visual “Проверяю…” state.
+            self.actionTestResult.emit(index, False, message)
             return
         if action_type not in ACTION_LABELS:
-            self.actionTestResult.emit(index, False, "Неизвестное действие")
+            message = "Неизвестное действие"
+            self._set_status(message)
+            self.actionTestResult.emit(index, False, message)
             return
         if action_type == "shell":
             message = "Системные команды проверяются только после сохранения и подтверждения"
             self._set_status(message)
             self.actionTestResult.emit(index, False, message)
+            return
+        if action_type != "wait" and not value.strip():
+            message = "Заполните значение шага"
+            self._set_status(message)
+            self.actionTestResult.emit(index, False, message)
+            return
+
+        # The wake-word worker owns the microphone. Stop it before a test so
+        # keyboard, window and media actions are not competing with background
+        # listening. The test starts immediately after the worker exits.
+        if self._wake_thread is not None:
+            self._pending_action_test = (index, action_type, value)
+            self._set_status(f"Готовлю проверку шага {index + 1}…")
+            self._stop_wake_listener()
+            return
+        self._start_action_test(index, action_type, value)
+
+    def _start_action_test(self, index: int, action_type: str, value: str) -> None:
+        if self._action_test_thread is not None:
             return
         step = ActionStep(action_type=action_type, value=value)
         thread = QThread(self)
@@ -676,6 +705,7 @@ class AssistantBackend(QObject):
         self._action_test_worker = None
         self._testing_action_index = -1
         self.testingStateChanged.emit()
+        QTimer.singleShot(180, self.startWakeListening)
 
     @Slot(int, int, str)
     def _on_scenario_test_progress(self, current: int, total: int, text: str) -> None:
@@ -1051,6 +1081,11 @@ class AssistantBackend(QObject):
             self._pending_recording = False
             self._set_listening(False)
             QTimer.singleShot(0, self._start_recording_now)
+        elif self._pending_action_test is not None:
+            pending = self._pending_action_test
+            self._pending_action_test = None
+            self._set_listening(False)
+            QTimer.singleShot(0, lambda: self._start_action_test(*pending))
         else:
             self._set_listening(False)
             if self._wake_enabled and not self._busy and not self._recording and not self._voice_speaking:

@@ -1,54 +1,29 @@
-# Automatic update setup
+# Автоматические обновления AURA
 
-AURA checks the latest stable GitHub Release and expects two attached files:
+## Первый выпуск
 
-- `AURA-Setup-X.Y.Z.exe`
-- `AURA-Setup-X.Y.Z.exe.sha256`
+1. Загрузите содержимое проекта в корень репозитория GitHub.
+2. Убедитесь, что существует только один workflow:
 
-## First repository setup
+`.github/workflows/release.yml`
 
-1. Upload the project contents to the repository root.
-2. Keep `.github/workflows/release.yml` in place.
-3. Keep only one release workflow file.
-4. Make the repository public, or adapt the updater for authenticated access.
+3. Выполните commit и push в ветку `main`.
+4. Создайте Release с новым тегом, например `v0.6.1`.
+5. Выберите метку `Latest` и опубликуйте Release.
 
-## Publish a version
+GitHub Actions соберёт и прикрепит:
 
-Commit and push the source changes to `main`, then create a new release tag:
+- `AURA-Setup-0.6.1.exe`
+- `AURA-Setup-0.6.1.exe.sha256`
 
-```text
-v0.6.0
-```
+## Следующие обновления
 
-Target the `main` branch and publish the release as `Latest`.
+Для каждой версии используйте новый тег:
 
-The GitHub Actions workflow will:
+- исправление: `v0.6.2`
+- крупная функция: `v0.7.0`
+- стабильный выпуск: `v1.0.0`
 
-1. Set the application version from the tag.
-2. Configure the current GitHub repository for updates.
-3. Run tests.
-4. Generate the local voice pack.
-5. Build AURA and AURAUpdater.
-6. Build the Inno Setup installer.
-7. Generate SHA-256.
-8. Attach both files to the release.
+После установки AURA проверяет новый выпуск через 5 секунд после запуска и затем каждые 15 минут. Ручная проверка доступна через значок AURA в системном трее.
 
-## Publish later updates
-
-Use a new tag every time, for example:
-
-```text
-v0.6.1
-v0.6.2
-v0.7.0
-```
-
-Do not reuse an old tag or replace an already distributed installer under the same version.
-
-## User data
-
-User commands and settings are stored in `%APPDATA%\AURA`, outside the installation directory. Installing a new version should not remove them.
-
-## Important updater note
-
-Users must install at least one build that contains the corrected updater. Source mode started with `START_AURA.cmd` can check updates, but automatic replacement is intended for the installed build.
+Пользовательские команды хранятся в `%APPDATA%\AURA` и не заменяются установщиком.

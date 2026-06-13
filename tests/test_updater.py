@@ -53,9 +53,17 @@ class UpdaterTests(unittest.TestCase):
             path.write_text(json.dumps({
                 "enabled": True,
                 "repository": "owner/aura",
-                "check_interval_hours": "broken",
+                "check_interval_minutes": "broken",
             }), encoding="utf-8")
-            self.assertEqual(load_config(path).check_interval_hours, 12)
+            self.assertEqual(load_config(path).check_interval_minutes, 15)
+
+    def test_legacy_hour_interval_is_converted_to_minutes(self) -> None:
+        config = UpdateConfig.from_dict({"check_interval_hours": 2})
+        self.assertEqual(config.check_interval_minutes, 120)
+
+    def test_update_interval_is_never_below_five_minutes(self) -> None:
+        config = UpdateConfig.from_dict({"check_interval_minutes": 1})
+        self.assertEqual(config.check_interval_minutes, 5)
 
     def test_download_verifies_sha256(self) -> None:
         payload = b"installer bytes"

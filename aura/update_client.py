@@ -23,22 +23,34 @@ class UpdateConfig:
     enabled: bool
     provider: str
     repository: str
-    check_interval_hours: int
+    check_interval_minutes: int
     auto_download: bool
     asset_name_template: str
     checksum_name_template: str
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "UpdateConfig":
-        try:
-            interval = int(payload.get("check_interval_hours", 12))
-        except (TypeError, ValueError):
-            interval = 12
+        # New builds use minutes so frequent releases are noticed quickly.
+        # The old hours field is still accepted for installed configs made by
+        # previous AURA versions.
+        raw_minutes = payload.get("check_interval_minutes")
+        if raw_minutes is None:
+            try:
+                minutes = int(payload.get("check_interval_hours", 0)) * 60
+            except (TypeError, ValueError):
+                minutes = 15
+            if minutes <= 0:
+                minutes = 15
+        else:
+            try:
+                minutes = int(raw_minutes)
+            except (TypeError, ValueError):
+                minutes = 15
         return cls(
             enabled=bool(payload.get("enabled", False)),
             provider=str(payload.get("provider") or "github").strip().lower(),
             repository=str(payload.get("repository") or "").strip(),
-            check_interval_hours=max(1, min(interval, 168)),
+            check_interval_minutes=max(5, min(minutes, 7 * 24 * 60)),
             auto_download=bool(payload.get("auto_download", True)),
             asset_name_template=str(payload.get("asset_name_template") or "AURA-Setup-{version}.exe"),
             checksum_name_template=str(payload.get("checksum_name_template") or "AURA-Setup-{version}.exe.sha256"),

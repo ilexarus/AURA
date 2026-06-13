@@ -1,0 +1,6 @@
+AURA 0.6.2 patch
+
+1. Close AURA.
+2. Copy all files from this folder into the root of the AURA source repository.
+3. Confirm replacement.
+4. Run START_AURA.cmd and test the checkbox and the per-step play button.
