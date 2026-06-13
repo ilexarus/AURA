@@ -95,6 +95,7 @@ class CommandStore:
                     ActionStep("open_url", "https://mail.google.com", delay_after=1.0),
                     ActionStep("open_app", "explorer"),
                 ],
+                command_type="mode",
             ),
             VoiceCommand(
                 name="Сделать скриншот",

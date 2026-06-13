@@ -194,50 +194,11 @@ ApplicationWindow {
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 22
-                spacing: 18
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 12
-                    Rectangle {
-                        width: 38; height: 38; radius: 13
-                        gradient: Gradient {
-                            GradientStop { position: 0; color: "#997FFF" }
-                            GradientStop { position: 1; color: "#6240E8" }
-                        }
-                        Text {
-                            anchors.centerIn: parent
-                            text: "A"
-                            color: "white"
-                            font.pixelSize: 19
-                            font.bold: true
-                        }
-                    }
-                    Column {
-                        Layout.fillWidth: true
-                        Text { text: "AURA"; color: root.textMain; font.pixelSize: 17; font.bold: true; font.letterSpacing: 1.1 }
-                        Text { text: "voice assistant"; color: root.textMuted; font.pixelSize: 11 }
-                    }
-                }
-
-                Item { height: 3 }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 46
-                    radius: 13
-                    color: "#19192A"
-                    border.color: "#2D2850"
-                    Row {
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left
-                        anchors.leftMargin: 14
-                        spacing: 11
-                        Text { text: "◉"; color: root.accentSoft; font.pixelSize: 17 }
-                        Text { text: "Ассистент"; color: root.textMain; font.pixelSize: 14; font.weight: Font.DemiBold }
-                    }
-                }
+                anchors.leftMargin: 22
+                anchors.rightMargin: 22
+                anchors.topMargin: 18
+                anchors.bottomMargin: 22
+                spacing: 14
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -283,6 +244,8 @@ ApplicationWindow {
                                     || String(modelData.name).toLowerCase().indexOf(root.commandSearch) >= 0
                                     || String(modelData.phrases_text).toLowerCase().indexOf(root.commandSearch) >= 0
                                     || String(modelData.preview).toLowerCase().indexOf(root.commandSearch) >= 0
+                                    || String(modelData.type_label).toLowerCase().indexOf(root.commandSearch) >= 0
+                                    || String(modelData.trigger_label).toLowerCase().indexOf(root.commandSearch) >= 0
                                 width: commandColumn.width
                                 height: matchesSearch ? 54 : 0
                                 visible: matchesSearch
@@ -293,7 +256,7 @@ ApplicationWindow {
                                 RowLayout {
                                     anchors.fill: parent
                                     anchors.leftMargin: 11
-                                    anchors.rightMargin: 8
+                                    anchors.rightMargin: 11
                                     spacing: 9
                                     Rectangle {
                                         width: 7; height: 7; radius: 4
@@ -312,13 +275,13 @@ ApplicationWindow {
                                         }
                                         Text {
                                             Layout.fillWidth: true
-                                            text: modelData.preview || (modelData.steps_count + " действий")
+                                            text: modelData.preview
+                                            visible: String(modelData.preview || "").length > 0
                                             color: root.textMuted
                                             font.pixelSize: 9
                                             elide: Text.ElideRight
                                         }
                                     }
-                                    Text { text: "›"; color: "#697386"; font.pixelSize: 18 }
                                 }
                                 MouseArea {
                                     id: commandMouse
@@ -346,6 +309,12 @@ ApplicationWindow {
 
                 SoftButton {
                     Layout.fillWidth: true
+                    text: "◇  Шаблоны режимов"
+                    onClicked: templateDialog.open()
+                }
+
+                SoftButton {
+                    Layout.fillWidth: true
                     text: "⚙  Настройки"
                     onClicked: {
                         backend.refreshMicrophones()
@@ -353,27 +322,6 @@ ApplicationWindow {
                     }
                 }
 
-                Rectangle { Layout.fillWidth: true; height: 1; color: root.line }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Rectangle {
-                        width: 9; height: 9; radius: 5
-                        color: root.assistantStateColor
-                        SequentialAnimation on opacity {
-                            running: backend.listening || backend.recording
-                            loops: Animation.Infinite
-                            NumberAnimation { to: 0.25; duration: 550 }
-                            NumberAnimation { to: 1; duration: 550 }
-                        }
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        text: root.assistantStateLabel
-                        color: root.textMuted
-                        font.pixelSize: 12
-                    }
-                }
             }
         }
 
@@ -738,18 +686,11 @@ ApplicationWindow {
                                 Layout.maximumWidth: 470
                                 horizontalAlignment: Text.AlignHCenter
                                 wrapMode: Text.WordWrap
-                                text: backend.transcript.length ? "«" + backend.transcript + "»" : "Скажите «Аура» или нажмите кнопку"
+                                text: backend.transcript.length ? "«" + backend.transcript + "»" : "Скажите «Аура», затем назовите команду"
                                 color: root.textMuted
                                 font.pixelSize: 13
                             }
 
-                            AccentButton {
-                                Layout.alignment: Qt.AlignHCenter
-                                implicitWidth: 190
-                                text: backend.listening ? "Слушаю" : "Начать говорить"
-                                enabled: !backend.listening
-                                onClicked: backend.toggleListening()
-                            }
 
                             RowLayout {
                                 Layout.fillWidth: true
@@ -772,48 +713,6 @@ ApplicationWindow {
                         Layout.preferredWidth: 300
                         Layout.fillHeight: true
                         spacing: 20
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 220
-                            radius: 20
-                            color: root.panel
-                            border.color: root.line
-
-                            ColumnLayout {
-                                anchors.fill: parent
-                                anchors.margins: 20
-                                spacing: 13
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Text { Layout.fillWidth: true; text: "Быстрый старт"; color: root.textMain; font.pixelSize: 16; font.bold: true }
-                                    Text { text: "3 шага"; color: root.accentSoft; font.pixelSize: 11 }
-                                }
-                                Rectangle { Layout.fillWidth: true; height: 1; color: root.line }
-                                Repeater {
-                                    model: [
-                                        ["1", "Создайте команду", "Укажите понятную голосовую фразу"],
-                                        ["2", "Выберите действие", "Сайт, программа, клавиши или текст"],
-                                        ["3", "Скажите фразу", "AURA выполнит действие за вас"]
-                                    ]
-                                    delegate: RowLayout {
-                                        required property var modelData
-                                        Layout.fillWidth: true
-                                        spacing: 11
-                                        Rectangle {
-                                            width: 27; height: 27; radius: 9
-                                            color: "#211B3B"
-                                            Text { anchors.centerIn: parent; text: modelData[0]; color: root.accentSoft; font.pixelSize: 12; font.bold: true }
-                                        }
-                                        Column {
-                                            Layout.fillWidth: true
-                                            Text { text: modelData[1]; color: root.textMain; font.pixelSize: 12; font.weight: Font.DemiBold }
-                                            Text { width: 210; text: modelData[2]; color: root.textMuted; font.pixelSize: 10; wrapMode: Text.WordWrap }
-                                        }
-                                    }
-                                }
-                            }
-                        }
 
                         Rectangle {
                             Layout.fillWidth: true
@@ -886,14 +785,84 @@ ApplicationWindow {
         }
     }
 
+    Rectangle {
+        id: executionHud
+        z: 80
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.topMargin: 76
+        anchors.rightMargin: 26
+        width: 310
+        height: backend.busy ? 118 : 0
+        visible: height > 0
+        opacity: backend.busy ? 1 : 0
+        radius: 18
+        color: "#E9131823"
+        border.color: "#3B4458"
+        clip: true
+        Behavior on height { NumberAnimation { duration: 190; easing.type: Easing.OutCubic } }
+        Behavior on opacity { NumberAnimation { duration: 160 } }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 14
+            spacing: 8
+            RowLayout {
+                Layout.fillWidth: true
+                Rectangle {
+                    width: 30; height: 30; radius: 10; color: "#241D42"
+                    Text { anchors.centerIn: parent; text: "A"; color: root.accentSoft; font.bold: true; font.pixelSize: 14 }
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 1
+                    Text { Layout.fillWidth: true; text: backend.activeCommandName || "Выполнение сценария"; color: root.textMain; font.pixelSize: 12; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                    Text { Layout.fillWidth: true; text: backend.executionText || backend.status; color: root.textMuted; font.pixelSize: 9; elide: Text.ElideRight }
+                }
+                ToolButton {
+                    id: stopHudButton
+                    implicitWidth: 30; implicitHeight: 30
+                    text: "■"
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Остановить сценарий"
+                    onClicked: backend.stopExecution()
+                    background: Rectangle { radius: 9; color: stopHudButton.hovered ? "#38202A" : "#231A23" }
+                    contentItem: Text { text: stopHudButton.text; color: "#FF8C99"; font.pixelSize: 10; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                }
+            }
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 6
+                radius: 3
+                color: "#252C3A"
+                Rectangle {
+                    width: parent.width * (backend.executionTotal > 0 ? Math.min(1, backend.executionCurrent / backend.executionTotal) : 0.08)
+                    height: parent.height
+                    radius: 3
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: "#8A6BFF" }
+                        GradientStop { position: 1; color: "#5CB7FF" }
+                    }
+                    Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Text { text: backend.executionTotal > 0 ? (backend.executionCurrent + " из " + backend.executionTotal) : "Подготовка"; color: root.textMuted; font.pixelSize: 9 }
+                Item { Layout.fillWidth: true }
+                Text { text: "Ctrl + Shift + F12 для остановки"; color: "#626C7E"; font.pixelSize: 8 }
+            }
+        }
+    }
+
     ListModel {
         id: actionModel
     }
 
     Dialog {
         id: editor
-        width: Math.min(700, root.width - 48)
-        height: Math.min(720, root.height - 40)
+        width: Math.min(760, root.width - 48)
+        height: Math.min(840, root.height - 32)
         anchors.centerIn: parent
         modal: true
         dim: true
@@ -989,6 +958,9 @@ ApplicationWindow {
             if (type === "minimize_window") return "Часть заголовка окна"
             if (type === "maximize_window") return "Часть заголовка окна"
             if (type === "close_window") return "Часть заголовка окна"
+            if (type === "require_file") return "C:\\Путь\\к\\файлу"
+            if (type === "require_window") return "Часть заголовка окна"
+            if (type === "require_time") return "09:00-18:00"
             return "Команда PowerShell или CMD"
         }
 
@@ -1007,8 +979,26 @@ ApplicationWindow {
             { label: "Свернуть окно", value: "minimize_window" },
             { label: "Развернуть окно", value: "maximize_window" },
             { label: "Закрыть окно", value: "close_window" },
+            { label: "Условие: файл существует", value: "require_file" },
+            { label: "Условие: окно открыто", value: "require_window" },
+            { label: "Условие: время", value: "require_time" },
             { label: "Выполнить системную команду", value: "shell" }
         ]
+
+        property var commandTypeChoices: [
+            { label: "Обычная команда", value: "command" },
+            { label: "Режим компьютера", value: "mode" }
+        ]
+        property var triggerChoices: [
+            { label: "По голосовой фразе", value: "voice" },
+            { label: "При запуске AURA", value: "startup" },
+            { label: "Каждый день по времени", value: "daily" }
+        ]
+        function choiceIndex(items, value) {
+            for (var i = 0; i < items.length; ++i)
+                if (items[i].value === value) return i
+            return 0
+        }
 
         onOpened: {
             var command = root.editingCommand
@@ -1016,6 +1006,9 @@ ApplicationWindow {
             nameField.text = draft ? draft.name : (command ? command.name : "")
             phrasesField.text = draft ? draft.phrases : (command ? command.phrases_text : "")
             confirmSwitch.checked = draft ? draft.confirmation : (command ? command.require_confirmation : false)
+            commandTypeCombo.currentIndex = choiceIndex(commandTypeChoices, draft ? draft.commandType : (command ? command.command_type : "command"))
+            triggerCombo.currentIndex = choiceIndex(triggerChoices, draft ? draft.triggerType : (command ? command.trigger_type : "voice"))
+            triggerTimeField.text = draft ? draft.triggerValue : (command ? command.trigger_value : "09:00")
             actionModel.clear()
 
             if (root.recordedActions && root.recordedActions.length > 0) {
@@ -1042,8 +1035,8 @@ ApplicationWindow {
 
         contentItem: ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 26
-            spacing: 11
+            anchors.margins: 24
+            spacing: 10
 
             Item {
                 Layout.fillWidth: true
@@ -1073,9 +1066,88 @@ ApplicationWindow {
             AppTextField {
                 id: phrasesField
                 Layout.fillWidth: true
+                enabled: triggerCombo.currentValue === "voice"
+                opacity: enabled ? 1 : 0.45
                 placeholderText: "начать работу, открой рабочие сайты"
             }
-            Text { text: "Несколько фраз разделяйте запятыми"; color: root.textMuted; font.pixelSize: 10 }
+            Text {
+                text: triggerCombo.currentValue === "voice" ? "Несколько фраз разделяйте запятыми" : "Для автоматического запуска голосовая фраза необязательна"
+                color: root.textMuted
+                font.pixelSize: 10
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 108
+                radius: 14
+                color: "#151A25"
+                border.color: root.line
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 11
+                    spacing: 9
+                    ColumnLayout {
+                        Layout.preferredWidth: 176
+                        Layout.alignment: Qt.AlignTop
+                        spacing: 4
+                        Text { text: "Тип"; color: root.textMuted; font.pixelSize: 9 }
+                        ComboBox {
+                            id: commandTypeCombo
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 36
+                            model: editor.commandTypeChoices
+                            textRole: "label"
+                            valueRole: "value"
+                            contentItem: Text { leftPadding: 11; text: commandTypeCombo.displayText; color: root.textMain; font.pixelSize: 11; verticalAlignment: Text.AlignVCenter }
+                            background: Rectangle { radius: 10; color: "#0D111A"; border.color: root.line }
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: commandTypeCombo.currentValue === "mode"
+                                ? "Режим объединяет несколько действий и подготавливает компьютер к задаче."
+                                : "Команда выполняет отдельную задачу по вашему запросу."
+                            color: root.textMuted
+                            font.pixelSize: 9
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignTop
+                        spacing: 4
+                        Text { text: "Запуск"; color: root.textMuted; font.pixelSize: 9 }
+                        ComboBox {
+                            id: triggerCombo
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 36
+                            model: editor.triggerChoices
+                            textRole: "label"
+                            valueRole: "value"
+                            contentItem: Text { leftPadding: 11; text: triggerCombo.displayText; color: root.textMain; font.pixelSize: 11; verticalAlignment: Text.AlignVCenter }
+                            background: Rectangle { radius: 10; color: "#0D111A"; border.color: root.line }
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: triggerCombo.currentValue === "startup"
+                                ? "Сценарий запустится автоматически после старта AURA."
+                                : triggerCombo.currentValue === "daily"
+                                    ? "Сценарий будет запускаться один раз в день в указанное время."
+                                    : "Сценарий запустится после одной из голосовых фраз выше."
+                            color: root.textMuted
+                            font.pixelSize: 9
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                    ColumnLayout {
+                        visible: triggerCombo.currentValue === "daily"
+                        Layout.preferredWidth: visible ? 80 : 0
+                        Layout.alignment: Qt.AlignTop
+                        spacing: 4
+                        Text { text: "Время"; color: root.textMuted; font.pixelSize: 9 }
+                        AppTextField { id: triggerTimeField; Layout.fillWidth: true; Layout.preferredHeight: 36; placeholderText: "09:00" }
+                    }
+                }
+            }
 
             RowLayout {
                 Layout.fillWidth: true
@@ -1095,7 +1167,10 @@ ApplicationWindow {
                         root.recordingDraft = {
                             "name": nameField.text,
                             "phrases": phrasesField.text,
-                            "confirmation": confirmSwitch.checked
+                            "confirmation": confirmSwitch.checked,
+                            "commandType": commandTypeCombo.currentValue,
+                            "triggerType": triggerCombo.currentValue,
+                            "triggerValue": triggerTimeField.text
                         }
                         editor.close()
                         backend.startRecording()
@@ -1114,7 +1189,7 @@ ApplicationWindow {
                 id: actionsList
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.minimumHeight: 210
+                Layout.minimumHeight: 112
                 clip: true
                 spacing: 10
                 model: actionModel
@@ -1442,58 +1517,77 @@ ApplicationWindow {
                 }
             }
 
-            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.line }
-
-            RowLayout {
+            Rectangle {
+                id: editorFooter
                 Layout.fillWidth: true
-                Layout.preferredHeight: 42
-                Layout.minimumHeight: 42
-                spacing: 10
-                SoftButton {
-                    Layout.preferredHeight: 42
-                    Layout.minimumWidth: 96
-                    Layout.alignment: Qt.AlignVCenter
-                    visible: root.editingCommand !== null
-                    text: "Удалить"
-                    onClicked: {
-                        backend.deleteCommand(root.editingCommand.id)
-                        editor.close()
-                    }
+                Layout.preferredHeight: 58
+                Layout.minimumHeight: 58
+                color: "transparent"
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    height: 1
+                    color: root.line
                 }
-                SoftButton {
-                    Layout.preferredHeight: 42
-                    Layout.minimumWidth: 118
-                    Layout.alignment: Qt.AlignVCenter
-                    enabled: !backend.testingScenario && backend.testingActionIndex < 0
-                    text: backend.testingScenario ? "Проверяю…" : "▶  Проверить всё"
-                    onClicked: {
-                        root.scenarioTestMessage = "Запускаю проверку сценария…"
-                        backend.testScenario(editor.collectActionsJson())
-                    }
-                }
-                Item { Layout.fillWidth: true }
-                SoftButton {
-                    Layout.preferredHeight: 42
-                    Layout.minimumWidth: 96
-                    Layout.alignment: Qt.AlignVCenter
-                    text: "Отмена"
-                    onClicked: editor.close()
-                }
-                AccentButton {
-                    Layout.preferredHeight: 42
-                    Layout.minimumWidth: 112
-                    Layout.alignment: Qt.AlignVCenter
-                    text: "Сохранить"
-                    onClicked: {
-                        var saved = backend.saveCommand(
-                            root.editingCommand ? root.editingCommand.id : "",
-                            nameField.text,
-                            phrasesField.text,
-                            editor.collectActionsJson(),
-                            confirmSwitch.checked
-                        )
-                        if (saved)
+
+                RowLayout {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 44
+                    spacing: 10
+
+                    SoftButton {
+                        Layout.preferredHeight: 42
+                        Layout.minimumWidth: 96
+                        Layout.alignment: Qt.AlignVCenter
+                        visible: root.editingCommand !== null
+                        text: "Удалить"
+                        onClicked: {
+                            backend.deleteCommand(root.editingCommand.id)
                             editor.close()
+                        }
+                    }
+                    SoftButton {
+                        Layout.preferredHeight: 42
+                        Layout.minimumWidth: 132
+                        Layout.alignment: Qt.AlignVCenter
+                        enabled: !backend.testingScenario && backend.testingActionIndex < 0
+                        text: backend.testingScenario ? "Проверяю…" : "▶  Проверить всё"
+                        onClicked: {
+                            root.scenarioTestMessage = "Запускаю проверку сценария…"
+                            backend.testScenario(editor.collectActionsJson())
+                        }
+                    }
+                    Item { Layout.fillWidth: true }
+                    SoftButton {
+                        Layout.preferredHeight: 42
+                        Layout.minimumWidth: 104
+                        Layout.alignment: Qt.AlignVCenter
+                        text: "Отмена"
+                        onClicked: editor.close()
+                    }
+                    AccentButton {
+                        Layout.preferredHeight: 42
+                        Layout.minimumWidth: 120
+                        Layout.alignment: Qt.AlignVCenter
+                        text: "Сохранить"
+                        onClicked: {
+                            var saved = backend.saveAutomationCommand(
+                                root.editingCommand ? root.editingCommand.id : "",
+                                nameField.text,
+                                phrasesField.text,
+                                editor.collectActionsJson(),
+                                confirmSwitch.checked,
+                                commandTypeCombo.currentValue,
+                                triggerCombo.currentValue,
+                                triggerTimeField.text
+                            )
+                            if (saved)
+                                editor.close()
+                        }
                     }
                 }
             }
@@ -2060,6 +2154,77 @@ ApplicationWindow {
         running: !backend.firstRunCompleted
         repeat: false
         onTriggered: firstRunDialog.open()
+    }
+
+    Dialog {
+        id: templateDialog
+        width: Math.min(650, root.width - 60)
+        height: Math.min(470, root.height - 70)
+        anchors.centerIn: parent
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+        padding: 0
+        background: Rectangle { radius: 22; color: "#121722"; border.color: "#303747" }
+        Overlay.modal: Rectangle { color: "#AA05070B" }
+
+        contentItem: ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 24
+            spacing: 14
+            Item {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 44
+                Column {
+                    anchors.left: parent.left
+                    Text { text: "Шаблоны режимов"; color: root.textMain; font.pixelSize: 21; font.bold: true }
+                    Text { text: "Добавьте готовый сценарий и настройте программы под себя"; color: root.textMuted; font.pixelSize: 11; topPadding: 3 }
+                }
+                AuraCloseButton { anchors.top: parent.top; anchors.right: parent.right; anchors.topMargin: -12; anchors.rightMargin: -12; onClicked: templateDialog.close() }
+            }
+            GridView {
+                id: templateGrid
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                cellWidth: Math.floor(width / 2)
+                cellHeight: 142
+                model: backend.modeTemplates
+                delegate: Item {
+                    required property var modelData
+                    width: templateGrid.cellWidth
+                    height: templateGrid.cellHeight
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: 6
+                        radius: 16
+                        color: templateMouse.containsMouse ? "#1A2030" : "#151A25"
+                        border.color: templateMouse.containsMouse ? "#51428A" : root.line
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 15
+                            spacing: 7
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Rectangle { width: 30; height: 30; radius: 10; color: "#241D42"; Text { anchors.centerIn: parent; text: "◇"; color: root.accentSoft; font.pixelSize: 15 } }
+                                Text { Layout.fillWidth: true; text: modelData.name; color: root.textMain; font.pixelSize: 13; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                            }
+                            Text { Layout.fillWidth: true; Layout.fillHeight: true; text: modelData.description; color: root.textMuted; font.pixelSize: 10; wrapMode: Text.WordWrap }
+                            Text { text: "+ Добавить режим"; color: root.accentSoft; font.pixelSize: 10; font.weight: Font.DemiBold }
+                        }
+                        MouseArea {
+                            id: templateMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                backend.createModeTemplate(modelData.id)
+                                templateDialog.close()
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Dialog {

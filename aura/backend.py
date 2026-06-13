@@ -65,9 +65,61 @@ ACTION_CATALOG = [
     {"type": "minimize_window", "label": "Свернуть окно", "hint": "Часть заголовка окна"},
     {"type": "maximize_window", "label": "Развернуть окно", "hint": "Часть заголовка окна"},
     {"type": "close_window", "label": "Закрыть окно", "hint": "Часть заголовка окна"},
+    {"type": "require_file", "label": "Условие: файл существует", "hint": r"C:\Путь\к\файлу"},
+    {"type": "require_window", "label": "Условие: окно открыто", "hint": "Часть заголовка окна"},
+    {"type": "require_time", "label": "Условие: время", "hint": "09:00-18:00"},
     {"type": "shell", "label": "Системная команда", "hint": "Команда CMD. Используйте осторожно"},
 ]
 ACTION_LABELS = {item["type"]: item["label"] for item in ACTION_CATALOG}
+
+MODE_TEMPLATES = [
+    {
+        "id": "work",
+        "name": "Рабочий режим",
+        "description": "Почта, браузер и папка проекта",
+        "phrases": ["рабочий режим", "начать работу"],
+        "actions": [
+            {"action_type": "open_url", "value": "https://mail.google.com", "delay_after": 1.0},
+            {"action_type": "open_app", "value": "explorer"},
+        ],
+    },
+    {
+        "id": "gaming",
+        "name": "Игровой режим",
+        "description": "Запуск Steam и Discord",
+        "phrases": ["игровой режим", "пора играть"],
+        "actions": [
+            {"action_type": "open_url", "value": "steam://open/main", "delay_after": 1.5},
+            {"action_type": "open_url", "value": "discord://-/channels/@me"},
+        ],
+    },
+    {
+        "id": "focus",
+        "name": "Режим концентрации",
+        "description": "Рабочий сайт и тихая пауза",
+        "phrases": ["режим концентрации", "сосредоточиться"],
+        "actions": [
+            {"action_type": "open_url", "value": "https://calendar.google.com", "delay_after": 1.0},
+            {"action_type": "wait", "value": "1"},
+        ],
+    },
+    {
+        "id": "evening",
+        "name": "Вечерний режим",
+        "description": "Медиа и папка загрузок",
+        "phrases": ["вечерний режим", "время отдыхать"],
+        "actions": [
+            {"action_type": "open_url", "value": "https://youtube.com", "delay_after": 1.0},
+            {"action_type": "open_path", "value": "${downloads}"},
+        ],
+    },
+]
+
+TRIGGER_LABELS = {
+    "voice": "по голосовой фразе",
+    "startup": "при запуске AURA",
+    "daily": "каждый день",
+}
 
 
 class ExecutionWorker(QObject):
@@ -350,6 +402,7 @@ class AssistantBackend(QObject):
     diagnosticsChanged = Signal()
     audioLevelChanged = Signal()
     orbVisualEvent = Signal(str)
+    executionStateChanged = Signal()
 
     def __init__(
         self,
@@ -399,6 +452,13 @@ class AssistantBackend(QObject):
         self._history: list[dict[str, str]] = []
         self._pending_command: VoiceCommand | None = None
         self._active_command: VoiceCommand | None = None
+        self._execution_current = 0
+        self._execution_total = 0
+        self._execution_text = ""
+
+        self._automation_queue: list[VoiceCommand] = []
+        self._automation_last_run: dict[str, str] = {}
+        self._startup_automations_queued = False
 
         self._speech_thread: QThread | None = None
         self._speech_worker: SpeechWorker | None = None
@@ -461,6 +521,12 @@ class AssistantBackend(QObject):
         if self._update_config.configured:
             self._update_timer.start()
 
+        self._automation_timer = QTimer(self)
+        self._automation_timer.setInterval(15_000)
+        self._automation_timer.timeout.connect(self._automation_tick)
+        self._automation_timer.start()
+        QTimer.singleShot(3200, self._queue_startup_automations)
+
     @Property("QVariantList", notify=commandsChanged)
     def commands(self) -> list[dict[str, object]]:
         result: list[dict[str, object]] = []
@@ -470,6 +536,9 @@ class AssistantBackend(QObject):
             if len(command.actions) > 2:
                 preview += f"  +{len(command.actions) - 2}"
             first_step = command.actions[0] if command.actions else ActionStep("open_url", "")
+            trigger_label = TRIGGER_LABELS.get(command.trigger_type, command.trigger_type)
+            if command.trigger_type == "daily" and command.trigger_value:
+                trigger_label = f"Каждый день в {command.trigger_value}"
             result.append({
                 **command.to_dict(),
                 "actions": actions,
@@ -479,12 +548,18 @@ class AssistantBackend(QObject):
                 "action_type": first_step.action_type,
                 "action_value": first_step.value,
                 "action_label": ACTION_LABELS.get(first_step.action_type, first_step.action_type),
+                "trigger_label": trigger_label,
+                "type_label": "режим компьютера" if command.command_type == "mode" else "обычная команда",
             })
         return result
 
     @Property("QVariantList", constant=True)
     def actionCatalog(self) -> list[dict[str, str]]:
         return ACTION_CATALOG
+
+    @Property("QVariantList", constant=True)
+    def modeTemplates(self) -> list[dict[str, object]]:
+        return MODE_TEMPLATES
 
     @Property(str, notify=statusChanged)
     def status(self) -> str:
@@ -501,6 +576,22 @@ class AssistantBackend(QObject):
     @Property(bool, notify=busyChanged)
     def busy(self) -> bool:
         return self._busy
+
+    @Property(int, notify=executionStateChanged)
+    def executionCurrent(self) -> int:
+        return self._execution_current
+
+    @Property(int, notify=executionStateChanged)
+    def executionTotal(self) -> int:
+        return self._execution_total
+
+    @Property(str, notify=executionStateChanged)
+    def executionText(self) -> str:
+        return self._execution_text
+
+    @Property(str, notify=executionStateChanged)
+    def activeCommandName(self) -> str:
+        return self._active_command.name if self._active_command else ""
 
     @Property(bool, notify=recordingChanged)
     def recording(self) -> bool:
@@ -1012,6 +1103,67 @@ class AssistantBackend(QObject):
         self._set_status("Завершаю запись действий…")
         self._recorder.stop()
 
+    def _queue_startup_automations(self) -> None:
+        if self._startup_automations_queued:
+            return
+        self._startup_automations_queued = True
+        for command in self.store.all():
+            if command.enabled and command.trigger_type == "startup":
+                self._automation_queue.append(command)
+        self._automation_tick()
+
+    def _automation_tick(self) -> None:
+        if self._busy or self._listening or self._recording or self._testing_scenario or self._action_test_thread is not None or self._pending_command is not None:
+            return
+
+        now = datetime.now()
+        current_time = now.strftime("%H:%M")
+        today = now.strftime("%Y-%m-%d")
+        queued_ids = {item.id for item in self._automation_queue}
+        for command in self.store.all():
+            if not command.enabled or command.trigger_type != "daily":
+                continue
+            if command.trigger_value != current_time:
+                continue
+            run_key = f"{today}:{current_time}"
+            if self._automation_last_run.get(command.id) == run_key or command.id in queued_ids:
+                continue
+            self._automation_last_run[command.id] = run_key
+            self._automation_queue.append(command)
+            queued_ids.add(command.id)
+
+        if self._automation_queue:
+            command = self._automation_queue.pop(0)
+            self._run_automation(command)
+
+    def _run_automation(self, command: VoiceCommand) -> None:
+        self._transcript = f"Автоматизация: {command.name}"
+        self.transcriptChanged.emit()
+        if command.require_confirmation:
+            self._pending_command = command
+            details = "\n".join(
+                f"{index}. {ACTION_LABELS.get(step.action_type, step.action_type)}: {step.value}"
+                for index, step in enumerate(command.actions, 1)
+            )
+            self._set_status(f"Автоматизация «{command.name}» ждёт подтверждения")
+            self.confirmationRequested.emit(command.name, details)
+            self._speak("confirmation")
+            return
+        self._execute(command)
+
+    @staticmethod
+    def _normalize_daily_time(value: str) -> str:
+        text = str(value or "").strip().replace(".", ":")
+        try:
+            hour_text, minute_text = text.split(":", 1)
+            hour = int(hour_text)
+            minute = int(minute_text)
+        except (ValueError, TypeError):
+            return ""
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return ""
+        return f"{hour:02d}:{minute:02d}"
+
     @Slot(str)
     def executeText(self, text: str) -> None:
         clean = text.strip()
@@ -1171,6 +1323,46 @@ class AssistantBackend(QObject):
 
     @Slot(str, str, str, str, bool, result=bool)
     def saveCommand(self, command_id: str, name: str, phrases_text: str, actions_json: str, require_confirmation: bool) -> bool:
+        existing = next((item for item in self.store.all() if item.id == command_id), None)
+        return self._save_command_payload(
+            command_id,
+            name,
+            phrases_text,
+            actions_json,
+            require_confirmation,
+            existing.command_type if existing else "command",
+            existing.trigger_type if existing else "voice",
+            existing.trigger_value if existing else "",
+        )
+
+    @Slot(str, str, str, str, bool, str, str, str, result=bool)
+    def saveAutomationCommand(
+        self,
+        command_id: str,
+        name: str,
+        phrases_text: str,
+        actions_json: str,
+        require_confirmation: bool,
+        command_type: str,
+        trigger_type: str,
+        trigger_value: str,
+    ) -> bool:
+        return self._save_command_payload(
+            command_id, name, phrases_text, actions_json, require_confirmation,
+            command_type, trigger_type, trigger_value,
+        )
+
+    def _save_command_payload(
+        self,
+        command_id: str,
+        name: str,
+        phrases_text: str,
+        actions_json: str,
+        require_confirmation: bool,
+        command_type: str,
+        trigger_type: str,
+        trigger_value: str,
+    ) -> bool:
         phrases = [item.strip()[:160] for item in phrases_text.replace("\n", ",").split(",") if item.strip()][:20]
         try:
             raw_actions = json.loads(actions_json)
@@ -1179,31 +1371,99 @@ class AssistantBackend(QObject):
             actions = [ActionStep.from_dict(item) for item in raw_actions[:200] if isinstance(item, dict)]
         except (json.JSONDecodeError, TypeError):
             actions = []
-        if not name.strip() or not phrases or not actions:
+
+        command_type = str(command_type or "command").strip().lower()
+        if command_type not in {"command", "mode"}:
+            command_type = "command"
+        trigger_type = str(trigger_type or "voice").strip().lower()
+        if trigger_type not in {"voice", "startup", "daily"}:
+            trigger_type = "voice"
+        trigger_value = str(trigger_value or "").strip()
+        if trigger_type == "daily":
+            trigger_value = self._normalize_daily_time(trigger_value)
+            if not trigger_value:
+                self._set_status("Для ежедневного запуска укажите время в формате 09:30")
+                return False
+        else:
+            trigger_value = ""
+
+        # Voice phrases are optional for purely automatic scenarios.
+        if not name.strip() or not actions or (trigger_type == "voice" and not phrases):
             self._set_status("Заполните название, фразы и добавьте хотя бы одно действие")
             return False
         allowed_types = set(ACTION_LABELS)
         for step in actions:
             if step.action_type not in allowed_types:
-                self._set_status("В команде есть неизвестное действие")
+                self._set_status("В сценарии есть неизвестное действие")
                 return False
             if not step.value.strip() and step.action_type != "wait":
                 self._set_status("Заполните значения всех действий")
                 return False
+
         command = VoiceCommand(
             id=command_id or VoiceCommand("", [], []).id,
             name=name.strip()[:120],
             phrases=phrases,
             actions=actions,
             require_confirmation=require_confirmation or any(step.action_type == "shell" for step in actions),
+            command_type=command_type,
+            trigger_type=trigger_type,
+            trigger_value=trigger_value,
         )
         existing = next((item for item in self.store.all() if item.id == command.id), None)
         if existing:
             command.enabled = existing.enabled
         self.store.save(command)
         self.commandsChanged.emit()
-        self._set_status(f"Команда «{command.name}» сохранена")
+        noun = "Режим" if command.command_type == "mode" else "Команда"
+        self._set_status(f"{noun} «{command.name}» сохранён")
         return True
+
+    @Slot(str)
+    def runCommandById(self, command_id: str) -> None:
+        if self._busy or self._recording or self._listening:
+            self._set_status("Сначала дождитесь завершения текущего действия")
+            return
+        command = next((item for item in self.store.all() if item.id == command_id), None)
+        if command is None or not command.enabled:
+            self._set_status("Сценарий недоступен")
+            return
+        self._transcript = command.name
+        self.transcriptChanged.emit()
+        if command.require_confirmation:
+            self._pending_command = command
+            details = "\n".join(
+                f"{index}. {ACTION_LABELS.get(step.action_type, step.action_type)}: {step.value}"
+                for index, step in enumerate(command.actions, 1)
+            )
+            self.confirmationRequested.emit(command.name, details)
+            self._set_status("Нужно подтверждение")
+            self._speak("confirmation")
+            return
+        self._execute(command)
+
+    @Slot(str)
+    def createModeTemplate(self, template_id: str) -> None:
+        template = next((item for item in MODE_TEMPLATES if item["id"] == template_id), None)
+        if template is None:
+            self._set_status("Шаблон не найден")
+            return
+        base_name = str(template["name"])
+        existing_names = {item.name for item in self.store.all()}
+        name = base_name
+        suffix = 2
+        while name in existing_names:
+            name = f"{base_name} {suffix}"
+            suffix += 1
+        command = VoiceCommand(
+            name=name,
+            phrases=list(template["phrases"]),
+            actions=[ActionStep.from_dict(item) for item in template["actions"]],
+            command_type="mode",
+        )
+        self.store.save(command)
+        self.commandsChanged.emit()
+        self._set_status(f"Шаблон «{name}» добавлен")
 
     @Slot(str)
     def deleteCommand(self, command_id: str) -> None:
@@ -1230,6 +1490,7 @@ class AssistantBackend(QObject):
             self._set_status("Действие отменено")
             self._add_history(command.name, "Отменено")
             self._speak("cancelled", lambda: QTimer.singleShot(150, self.startWakeListening))
+            QTimer.singleShot(350, self._automation_tick)
 
     @Slot()
     def stopExecution(self) -> None:
@@ -1353,6 +1614,10 @@ class AssistantBackend(QObject):
         self._stop_wake_listener()
         self._active_command = command
         self._execution_feedback_key = "done"
+        self._execution_current = 0
+        self._execution_total = len([step for step in command.actions if step.enabled])
+        self._execution_text = "Подготавливаю сценарий"
+        self.executionStateChanged.emit()
         self._set_busy(True)
         self._set_status(f"Запускаю «{command.name}»")
         self._speak("executing")
@@ -1378,6 +1643,10 @@ class AssistantBackend(QObject):
 
     @Slot(int, int, str)
     def _on_execution_progress(self, current: int, total: int, text: str) -> None:
+        self._execution_current = current
+        self._execution_total = total
+        self._execution_text = text
+        self.executionStateChanged.emit()
         self.orbVisualEvent.emit("step")
         self._set_status(f"{current}/{total}  {text}")
 
@@ -1385,6 +1654,9 @@ class AssistantBackend(QObject):
     def _on_execution_finished(self, message: str) -> None:
         command = self._active_command
         self._execution_feedback_key = "done"
+        self._execution_current = self._execution_total
+        self._execution_text = "Готово"
+        self.executionStateChanged.emit()
         self.orbVisualEvent.emit("success")
         self._set_status(message)
         self._add_history(self._transcript or (command.name if command else "Команда"), command.name if command else "Выполнено")
@@ -1393,6 +1665,8 @@ class AssistantBackend(QObject):
     def _on_execution_failed(self, message: str) -> None:
         command = self._active_command
         self._execution_feedback_key = "failed"
+        self._execution_text = message
+        self.executionStateChanged.emit()
         self.orbVisualEvent.emit("error")
         self._set_status(message)
         self._add_history(self._transcript or (command.name if command else "Команда"), f"Ошибка: {message}")
@@ -1402,12 +1676,17 @@ class AssistantBackend(QObject):
         feedback_key = self._execution_feedback_key
         self._execution_thread = None
         self._execution_worker = None
-        self._active_command = None
         self._speak(feedback_key, self._finish_execution_cleanup)
 
     def _finish_execution_cleanup(self) -> None:
         self._set_busy(False)
+        self._active_command = None
+        self._execution_current = 0
+        self._execution_total = 0
+        self._execution_text = ""
+        self.executionStateChanged.emit()
         QTimer.singleShot(180, self.startWakeListening)
+        QTimer.singleShot(350, self._automation_tick)
 
     @Slot(object)
     def _on_recognized(self, payload: object) -> None:

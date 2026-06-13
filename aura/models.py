@@ -43,13 +43,16 @@ class ActionStep:
 
 @dataclass(slots=True)
 class VoiceCommand:
-    """A voice phrase mapped to one or more visual action steps."""
+    """A voice phrase, mode, or automation mapped to visual action steps."""
 
     name: str
     phrases: list[str]
     actions: list[ActionStep]
     enabled: bool = True
     require_confirmation: bool = False
+    command_type: str = "command"
+    trigger_type: str = "voice"
+    trigger_value: str = ""
     id: str = field(default_factory=lambda: str(uuid4()))
 
     @classmethod
@@ -64,6 +67,16 @@ class VoiceCommand:
                     value=str(payload.get("action_value") or ""),
                 )
             ]
+
+        command_type = str(payload.get("command_type") or "command").strip().lower()
+        if command_type not in {"command", "mode"}:
+            command_type = "command"
+
+        trigger_type = str(payload.get("trigger_type") or "voice").strip().lower()
+        if trigger_type not in {"voice", "startup", "daily"}:
+            trigger_type = "voice"
+
+        trigger_value = str(payload.get("trigger_value") or "").strip()[:80]
         return cls(
             id=str(payload.get("id") or uuid4()),
             name=str(payload.get("name") or "Новая команда"),
@@ -71,6 +84,9 @@ class VoiceCommand:
             actions=actions,
             enabled=bool(payload.get("enabled", True)),
             require_confirmation=bool(payload.get("require_confirmation", False)),
+            command_type=command_type,
+            trigger_type=trigger_type,
+            trigger_value=trigger_value,
         )
 
     def to_dict(self) -> dict[str, Any]:

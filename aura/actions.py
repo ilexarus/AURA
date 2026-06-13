@@ -129,6 +129,9 @@ class ActionExecutor:
             "minimize_window": self._minimize_window,
             "maximize_window": self._maximize_window,
             "close_window": self._close_window,
+            "require_file": self._require_file,
+            "require_window": self._require_window,
+            "require_time": self._require_time,
             "shell": self._shell,
         }
         handler = handlers.get(step.action_type)
@@ -141,11 +144,36 @@ class ActionExecutor:
 
     @staticmethod
     def expand_variables(value: str) -> str:
+        home = Path.home()
+        downloads = home / "Downloads"
+        desktop = home / "Desktop"
+        last_download = ""
+        try:
+            files = [item for item in downloads.iterdir() if item.is_file()]
+            if files:
+                last_download = str(max(files, key=lambda item: item.stat().st_mtime))
+        except OSError:
+            pass
         replacements = {
-            "${home}": str(Path.home()),
+            "${home}": str(home),
+            "${user}": home.name,
+            "${downloads}": str(downloads),
+            "${desktop}": str(desktop),
+            "${last_download}": last_download,
             "${date}": datetime.now().strftime("%Y-%m-%d"),
             "${time}": datetime.now().strftime("%H:%M"),
         }
+        if sys.platform.startswith("win"):
+            try:
+                hwnd = ctypes.windll.user32.GetForegroundWindow()
+                length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+                buffer = ctypes.create_unicode_buffer(length + 1)
+                ctypes.windll.user32.GetWindowTextW(hwnd, buffer, length + 1)
+                replacements["${active_window}"] = buffer.value
+            except Exception:
+                replacements["${active_window}"] = ""
+        else:
+            replacements["${active_window}"] = ""
         try:
             import pyperclip
             replacements["${clipboard}"] = str(pyperclip.paste())
@@ -173,6 +201,9 @@ class ActionExecutor:
             "minimize_window": "Сворачиваю окно",
             "maximize_window": "Разворачиваю окно",
             "close_window": "Закрываю окно",
+            "require_file": "Проверяю файл",
+            "require_window": "Проверяю окно",
+            "require_time": "Проверяю время",
             "shell": "Выполняю системную команду",
         }
         return labels.get(step.action_type, step.action_type)
@@ -331,6 +362,36 @@ class ActionExecutor:
     @classmethod
     def _close_window(cls, value: str) -> None:
         ctypes.windll.user32.PostMessageW(cls._find_window(value), 0x0010, 0, 0)
+
+    @staticmethod
+    def _require_file(value: str) -> None:
+        path = Path(os.path.expandvars(os.path.expanduser(value))).resolve()
+        if not path.exists():
+            raise ActionError(f"Условие не выполнено: путь не найден: {path}")
+
+    @classmethod
+    def _require_window(cls, value: str) -> None:
+        cls._find_window(value, timeout=0.0)
+
+    @staticmethod
+    def _require_time(value: str) -> None:
+        text = value.strip().replace(" ", "")
+        start_text, separator, end_text = text.partition("-")
+        if not separator:
+            raise ActionError("Формат условия времени: 09:00-18:00")
+        try:
+            start_hour, start_minute = [int(part) for part in start_text.split(":", 1)]
+            end_hour, end_minute = [int(part) for part in end_text.split(":", 1)]
+            start = start_hour * 60 + start_minute
+            end = end_hour * 60 + end_minute
+        except (ValueError, TypeError) as exc:
+            raise ActionError("Формат условия времени: 09:00-18:00") from exc
+        if not (0 <= start < 1440 and 0 <= end < 1440):
+            raise ActionError("Укажите корректное время")
+        now = datetime.now().hour * 60 + datetime.now().minute
+        allowed = start <= now <= end if start <= end else now >= start or now <= end
+        if not allowed:
+            raise ActionError("Условие не выполнено: текущее время вне заданного диапазона")
 
     @staticmethod
     def _shell(value: str) -> None:

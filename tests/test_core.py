@@ -99,6 +99,53 @@ class CoreTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.command.name, "Browser")
 
+    def test_mode_automation_storage_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            store = CommandStore(Path(folder))
+            command = VoiceCommand(
+                "Morning mode",
+                ["morning mode"],
+                [ActionStep("open_url", "example.com")],
+                command_type="mode",
+                trigger_type="daily",
+                trigger_value="09:30",
+            )
+            store.save(command)
+            loaded = next(item for item in store.all() if item.id == command.id)
+            self.assertEqual(loaded.command_type, "mode")
+            self.assertEqual(loaded.trigger_type, "daily")
+            self.assertEqual(loaded.trigger_value, "09:30")
+
+    def test_legacy_command_gets_automation_defaults(self) -> None:
+        command = VoiceCommand.from_dict({
+            "name": "Legacy",
+            "phrases": ["legacy"],
+            "actions": [{"action_type": "wait", "value": "0"}],
+        })
+        self.assertEqual(command.command_type, "command")
+        self.assertEqual(command.trigger_type, "voice")
+        self.assertNotIn("favorite", command.to_dict())
+
+    def test_legacy_favorite_field_is_ignored(self) -> None:
+        command = VoiceCommand.from_dict({
+            "name": "Legacy favorite",
+            "phrases": ["legacy favorite"],
+            "actions": [{"action_type": "wait", "value": "0"}],
+            "favorite": True,
+        })
+        self.assertNotIn("favorite", command.to_dict())
+
+    def test_extended_variables_are_expanded(self) -> None:
+        value = ActionExecutor.expand_variables("${user}|${desktop}|${downloads}|${date}|${time}")
+        self.assertNotIn("${user}", value)
+        self.assertNotIn("${desktop}", value)
+        self.assertNotIn("${downloads}", value)
+
+    def test_file_condition_accepts_existing_path(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            executor = ActionExecutor()
+            executor.execute_step(ActionStep("require_file", folder))
+
 
 if __name__ == "__main__":
     unittest.main()

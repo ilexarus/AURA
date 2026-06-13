@@ -79,6 +79,50 @@ class InterfaceSourceTests(unittest.TestCase):
         self.assertIn('def animationIntensity', BACKEND)
         self.assertIn('def reduceMotion', BACKEND)
 
+    def test_modes_automations_and_hud_are_present(self) -> None:
+        self.assertIn('Шаблоны режимов', QML)
+        self.assertIn('id: executionHud', QML)
+        self.assertIn('backend.saveAutomationCommand', QML)
+        self.assertIn('triggerCombo', QML)
+        self.assertIn('def saveAutomationCommand', BACKEND)
+        self.assertIn('def _automation_tick', BACKEND)
+        self.assertIn('def createModeTemplate', BACKEND)
+
+    def test_safe_condition_actions_are_exposed(self) -> None:
+        self.assertIn('Условие: файл существует', QML)
+        self.assertIn('require_window', BACKEND)
+        self.assertIn('require_time', BACKEND)
+
+    def test_sidebar_is_compact_without_type_or_trigger_labels(self) -> None:
+        sidebar = QML.split('id: commandColumn', 1)[1].split('SoftButton {', 1)[0]
+        self.assertNotIn('text: "Тип: " + modelData.type_label', sidebar)
+        self.assertNotIn('text: "Запуск: " + modelData.trigger_label', sidebar)
+        self.assertIn('text: modelData.preview', sidebar)
+        self.assertNotIn('id: favoriteButton', sidebar)
+        self.assertNotIn('id: runSidebarButton', sidebar)
+
+    def test_favorites_feature_is_removed(self) -> None:
+        self.assertNotIn('text: "Избранное"', QML)
+        self.assertNotIn('id: favoriteSwitch', QML)
+        self.assertNotIn('id: favoriteModesList', QML)
+        self.assertNotIn('def setCommandFavorite', BACKEND)
+        self.assertNotIn('favorite: bool', (ROOT / "aura" / "models.py").read_text(encoding="utf-8"))
+
+    def test_editor_footer_keeps_buttons_inside_dialog(self) -> None:
+        self.assertIn('id: editorFooter', QML)
+        footer = QML.split('id: editorFooter', 1)[1].split('Dialog {', 1)[0]
+        self.assertIn('anchors.bottom: parent.bottom', footer)
+        self.assertIn('text: backend.testingScenario ? "Проверяю…" : "▶  Проверить всё"', footer)
+        self.assertIn('text: "Отмена"', footer)
+        self.assertIn('text: "Сохранить"', footer)
+
+    def test_type_and_trigger_have_explanations(self) -> None:
+        self.assertIn('Команда выполняет отдельную задачу', QML)
+        self.assertIn('Режим объединяет несколько действий', QML)
+        self.assertIn('Сценарий запустится после одной из голосовых фраз', QML)
+        self.assertIn('Сценарий запустится автоматически после старта AURA', QML)
+
+
 
 if __name__ == "__main__":
     unittest.main()

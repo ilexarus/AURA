@@ -1,14 +1,25 @@
 # Changelog
 
-## 0.7.3
+## 0.8.3
 
-- Полностью обновлена анимация центральной сферы без изменения общего стиля AURA.
-- Добавлено мягкое дыхание в режиме ожидания.
-- Добавлена визуальная реакция на слово активации, успешное выполнение, ошибку и каждый шаг сценария.
-- Кольцо и центральная волна реагируют на реальную громкость микрофона при локальном прослушивании.
-- Добавлены вращающиеся индикаторы распознавания и выполнения.
-- Добавлены настройки интенсивности, реакции на микрофон и уменьшения движения.
-- Добавлено сглаживание уровня микрофона для плавной анимации.
+- Removed the Favorite switch from the command editor.
+- Removed the favorite modes panel from the main screen.
+- Removed favorite persistence from new commands and templates.
+- Kept backward compatibility with old command files containing the legacy `favorite` field.
+- Expanded the recent activity panel into the freed space.
+
+## 0.7.5
+
+- Removed the redundant “Начать говорить” button from the main assistant screen.
+- Updated the helper text to focus on wake-phrase activation.
+- Manual recognition remains available through Ctrl + Shift + Space.
+
+## 0.7.4
+
+- Removed the redundant AURA branding block from the top of the sidebar.
+- Removed the duplicate assistant-mode card from the sidebar.
+- Removed the persistent status strip from the bottom of the sidebar.
+- Rebalanced sidebar spacing so commands receive more usable vertical space.
 
 ## 0.7.2
 
