@@ -73,6 +73,10 @@ class CoreTests(unittest.TestCase):
 
     def test_recorder_merges_double_click(self) -> None:
         recorder = ActionRecorder()
+        # Keep the unit test independent from the foreground window on the
+        # Windows GitHub Actions runner. Window activation is tested separately
+        # from click coalescing.
+        recorder._foreground_window_title = lambda: ""
         recorder._on_click(120, 240, "Button.left", True)
         recorder._on_click(120, 240, "Button.left", True)
         steps = recorder._finalize()

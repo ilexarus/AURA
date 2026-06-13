@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: aura-release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   release:
     runs-on: windows-latest
@@ -38,6 +42,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-core.txt pyinstaller numpy
 
+      - name: Run tests
+        shell: pwsh
+        run: |
+          python -m compileall -q .
+          python -m unittest discover -s tests -v
+
       - name: Install CPU PyTorch for voice generation
         shell: pwsh
         run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
@@ -45,12 +55,6 @@ jobs:
       - name: Generate local Silero voice pack
         shell: pwsh
         run: python tools/generate_silero_voice.py --profile "$env:AURA_VOICE_PROFILE" --speaker "$env:AURA_VOICE_SPEAKER"
-
-      - name: Run tests
-        shell: pwsh
-        run: |
-          python -m compileall -q .
-          python -m unittest discover -s tests -v
 
       - name: Build AURA and updater
         shell: cmd
