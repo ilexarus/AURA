@@ -19,7 +19,7 @@ from typing import Any
 PHRASES: dict[str, str] = {
     "executing": "Выполн+яю.",
     "done": "Гот+ово.",
-    "not_found": "Ком+анда не найден+а.",
+    "not_found": "Я не наш+ёл так+ую ком+анду.",
     "failed": "Не удал+ось в+ыполнить ком+анду.",
     "confirmation": "Подтверд+ите д+ействие.",
     "recording_started": "З+апись начат+а.",
@@ -87,7 +87,7 @@ def sha256_file(path: Path) -> str:
 def download_file(url: str, destination: Path, *, attempts: int = 4) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".download")
-    headers = {"User-Agent": "AURA-voice-pack-builder/0.5.6"}
+    headers = {"User-Agent": "AURA-voice-pack-builder/0.6.0"}
     last_error: Exception | None = None
 
     for attempt in range(1, attempts + 1):
@@ -266,7 +266,7 @@ def generate_pack(args: argparse.Namespace) -> dict[str, object]:
     manifest: dict[str, object] = {
         "format": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "generator": "AURA Silero voice pack builder 0.5.6",
+        "generator": "AURA Silero voice pack builder 0.6.0",
         "profile": profile.name,
         "model": profile.model_id,
         "model_sha256": sha256_file(cache_path),

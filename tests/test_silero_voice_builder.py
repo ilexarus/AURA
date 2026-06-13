@@ -21,6 +21,11 @@ class SileroVoiceBuilderTests(unittest.TestCase):
         self.assertEqual(set(MODULE.PHRASES), set(VOICE_FILES))
         self.assertEqual(MODULE.VOICE_FILES, VOICE_FILES)
 
+    def test_not_found_phrase_uses_unambiguous_wording(self) -> None:
+        phrase = MODULE.PHRASES["not_found"]
+        self.assertEqual(phrase, "Я не наш+ёл так+ую ком+анду.")
+        self.assertNotIn("найден", phrase.casefold())
+
     def test_quality_profile_is_marked_noncommercial(self) -> None:
         profile = MODULE.PROFILES["quality"]
         self.assertEqual(profile.model_id, "v5_5_ru")

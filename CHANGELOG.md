@@ -1,30 +1,25 @@
 # Changelog
 
+## 0.6.0
+
+- Added search across command names, phrases, and action previews.
+- Redesigned action cards while keeping the existing AURA visual style.
+- Added per-step testing with clear success and error highlighting.
+- Added full scenario testing before saving a command.
+- Added step duplication, enable/disable controls, and quick reordering.
+- Added a compact always-on-top recording panel with a stop button.
+- Improved assistant state colors for listening, recording, speaking, and execution.
+- Improved recent activity cards with time and result status.
+- Kept the corrected pause field and confirmation switch alignment.
+- Replaced the ambiguous voice phrase with: "Я не нашёл такую команду".
+- Preserved automatic updates, local wake-word activation, and existing user commands.
+
 ## 0.5.8
 
-- Fixed the silent updater command line on Windows.
-- Removed embedded quotation marks from the Inno Setup `/LOG` argument.
-- Added a visible error dialog when background installation fails.
-- Added automatic restart retries after a successful update.
-- Added updater regression tests.
+- Fixed automatic updater launch and installer logging.
 
 ## 0.5.7
 
-- Fixed the Windows-only double-click recorder unit test.
-- Removed the duplicate GitHub Actions workflow from the source package.
+- Fixed the Windows double-click recorder unit test.
+- Removed the duplicate GitHub Actions workflow.
 - Added release concurrency protection.
-- Tests now run before the large PyTorch download and voice generation.
-
-# AURA 0.3.1
-
-- Полностью сохранён прежний внешний вид основного окна.
-- В прежний редактор добавлены многошаговые сценарии без изменения общего стиля.
-- Добавлены паузы между действиями.
-- Выполнение перенесено в отдельный поток, поэтому интерфейс не зависает.
-- Старые команды AURA 0.1 и 0.2 автоматически преобразуются в новый формат.
-- Системные команды всегда требуют подтверждения.
-- Добавлен значок в системный трей.
-- Добавлена ротация журнала приложения.
-- Повреждённый файл команд сохраняется в резервную копию.
-- CMD-файлы используют ASCII и CRLF.
-- Добавлены portable-сборка и установщик Inno Setup.

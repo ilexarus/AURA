@@ -23,6 +23,13 @@ ApplicationWindow {
     property var editingCommand: null
     property var recordedActions: null
     property var recordingDraft: null
+    property string commandSearch: ""
+    property int testedStepIndex: -1
+    property string testedStepState: ""
+    property string testedStepMessage: ""
+    property string scenarioTestMessage: ""
+    property color assistantStateColor: backend.recording ? "#FF9A62" : backend.listening ? "#65B8FF" : backend.busy ? "#8A6BFF" : backend.voiceSpeaking ? "#43D17C" : backend.wakeListening ? root.accent : "#536071"
+    property string assistantStateLabel: backend.recording ? "Запись действий" : backend.listening ? "Микрофон активен" : backend.busy ? "Выполняю действие" : backend.voiceSpeaking ? "Отвечаю" : backend.wakeListening ? "Жду фразу «Аура»" : "Готов к работе"
 
     font.family: "Segoe UI"
 
@@ -159,13 +166,30 @@ ApplicationWindow {
                     }
                 }
 
-                Text {
-                    text: "МОИ КОМАНДЫ"
-                    color: "#626C7E"
-                    font.pixelSize: 10
-                    font.bold: true
-                    font.letterSpacing: 1.2
-                    topPadding: 8
+                RowLayout {
+                    Layout.fillWidth: true
+                    Text {
+                        Layout.fillWidth: true
+                        text: "МОИ КОМАНДЫ"
+                        color: "#626C7E"
+                        font.pixelSize: 10
+                        font.bold: true
+                        font.letterSpacing: 1.2
+                        topPadding: 8
+                    }
+                    Text {
+                        text: backend.commands.length
+                        color: root.textMuted
+                        font.pixelSize: 10
+                    }
+                }
+
+                AppTextField {
+                    id: commandSearchField
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 38
+                    placeholderText: "Поиск команд"
+                    onTextChanged: root.commandSearch = text.trim().toLowerCase()
                 }
 
                 Flickable {
@@ -182,34 +206,52 @@ ApplicationWindow {
                             model: backend.commands
                             delegate: Rectangle {
                                 required property var modelData
+                                property bool matchesSearch: root.commandSearch.length === 0
+                                    || String(modelData.name).toLowerCase().indexOf(root.commandSearch) >= 0
+                                    || String(modelData.phrases_text).toLowerCase().indexOf(root.commandSearch) >= 0
+                                    || String(modelData.preview).toLowerCase().indexOf(root.commandSearch) >= 0
                                 width: commandColumn.width
-                                height: 44
-                                radius: 11
-                                color: mouse.containsMouse ? "#151A25" : "transparent"
+                                height: matchesSearch ? 54 : 0
+                                visible: matchesSearch
+                                radius: 12
+                                color: commandMouse.containsMouse ? "#171D29" : "transparent"
                                 opacity: modelData.enabled ? 1 : 0.45
                                 Behavior on color { ColorAnimation { duration: 120 } }
                                 RowLayout {
                                     anchors.fill: parent
                                     anchors.leftMargin: 11
-                                    anchors.rightMargin: 7
+                                    anchors.rightMargin: 8
                                     spacing: 9
                                     Rectangle {
                                         width: 7; height: 7; radius: 4
                                         color: modelData.enabled ? root.accent : "#4F5867"
                                     }
-                                    Text {
+                                    ColumnLayout {
                                         Layout.fillWidth: true
-                                        text: modelData.name
-                                        color: root.textMain
-                                        font.pixelSize: 13
-                                        elide: Text.ElideRight
+                                        spacing: 2
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: modelData.name
+                                            color: root.textMain
+                                            font.pixelSize: 13
+                                            font.weight: Font.DemiBold
+                                            elide: Text.ElideRight
+                                        }
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: modelData.preview || (modelData.steps_count + " действий")
+                                            color: root.textMuted
+                                            font.pixelSize: 9
+                                            elide: Text.ElideRight
+                                        }
                                     }
                                     Text { text: "›"; color: "#697386"; font.pixelSize: 18 }
                                 }
                                 MouseArea {
-                                    id: mouse
+                                    id: commandMouse
                                     anchors.fill: parent
                                     hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
                                     onClicked: {
                                         root.editingCommand = modelData
                                         editor.open()
@@ -235,7 +277,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Rectangle {
                         width: 9; height: 9; radius: 5
-                        color: backend.recording ? "#FF9A62" : backend.listening ? "#43D17C" : backend.wakeListening ? root.accent : "#536071"
+                        color: root.assistantStateColor
                         SequentialAnimation on opacity {
                             running: backend.listening || backend.recording
                             loops: Animation.Infinite
@@ -245,7 +287,7 @@ ApplicationWindow {
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: backend.recording ? "Запись действий" : backend.listening ? "Микрофон активен" : backend.wakeListening ? "Жду фразу «Аура»" : "Готов к работе"
+                        text: root.assistantStateLabel
                         color: root.textMuted
                         font.pixelSize: 12
                     }
@@ -338,17 +380,17 @@ ApplicationWindow {
                                     width: 238; height: 238; radius: 119
                                     color: "transparent"
                                     border.width: 1
-                                    border.color: backend.listening ? "#544396" : "#232A38"
-                                    opacity: backend.listening ? 0.85 : 0.7
+                                    border.color: root.assistantStateColor
+                                    opacity: backend.listening || backend.busy || backend.recording ? 0.9 : 0.55
                                     scale: 1
                                     SequentialAnimation on scale {
-                                        running: backend.listening
+                                        running: backend.listening || backend.busy
                                         loops: Animation.Infinite
                                         NumberAnimation { to: 1.11; duration: 950; easing.type: Easing.InOutSine }
                                         NumberAnimation { to: 1; duration: 950; easing.type: Easing.InOutSine }
                                     }
                                     SequentialAnimation on opacity {
-                                        running: backend.listening
+                                        running: backend.listening || backend.busy
                                         loops: Animation.Infinite
                                         NumberAnimation { to: 0.15; duration: 950 }
                                         NumberAnimation { to: 0.85; duration: 950 }
@@ -360,7 +402,7 @@ ApplicationWindow {
                                     width: 192; height: 192; radius: 96
                                     color: "#121827"
                                     border.width: 1
-                                    border.color: backend.listening ? "#7D63E8" : "#303747"
+                                    border.color: root.assistantStateColor
 
                                     Rectangle {
                                         id: orb
@@ -402,7 +444,7 @@ ApplicationWindow {
 
                             Text {
                                 Layout.alignment: Qt.AlignHCenter
-                                text: backend.listening ? "Говорите…" : backend.status
+                                text: backend.listening ? "Говорите…" : backend.busy ? "Выполняю…" : backend.status
                                 color: root.textMain
                                 font.pixelSize: 17
                                 font.weight: Font.DemiBold
@@ -525,18 +567,30 @@ ApplicationWindow {
                                         delegate: Rectangle {
                                             required property var modelData
                                             width: ListView.view.width
-                                            height: 54
-                                            radius: 11
-                                            color: "#151A25"
-                                            Column {
-                                                anchors.left: parent.left
-                                                anchors.right: parent.right
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                anchors.margins: 11
-                                                spacing: 3
-                                                Text { width: parent.width; text: modelData.phrase; color: root.textMain; font.pixelSize: 11; elide: Text.ElideRight }
-                                                Text { width: parent.width; text: modelData.result; color: root.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
+                                            height: 62
+                                            radius: 12
+                                            color: historyMouse.containsMouse ? "#181E2A" : "#151A25"
+                                            border.color: historyMouse.containsMouse ? "#30394A" : "transparent"
+                                            RowLayout {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 11
+                                                anchors.rightMargin: 11
+                                                spacing: 9
+                                                Rectangle {
+                                                    width: 7
+                                                    height: 7
+                                                    radius: 4
+                                                    color: modelData.tone === "error" ? "#FF6B7A" : modelData.tone === "warning" ? "#FFB45E" : "#43D17C"
+                                                }
+                                                ColumnLayout {
+                                                    Layout.fillWidth: true
+                                                    spacing: 3
+                                                    Text { Layout.fillWidth: true; text: modelData.phrase; color: root.textMain; font.pixelSize: 11; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                                                    Text { Layout.fillWidth: true; text: modelData.result; color: root.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
+                                                }
+                                                Text { text: modelData.time || ""; color: "#626C7E"; font.pixelSize: 9; Layout.alignment: Qt.AlignTop }
                                             }
+                                            MouseArea { id: historyMouse; anchors.fill: parent; hoverEnabled: true }
                                         }
                                     }
                                 }
@@ -554,7 +608,7 @@ ApplicationWindow {
 
     Dialog {
         id: editor
-        width: Math.min(640, root.width - 48)
+        width: Math.min(700, root.width - 48)
         height: Math.min(720, root.height - 40)
         anchors.centerIn: parent
         modal: true
@@ -568,13 +622,52 @@ ApplicationWindow {
         }
         Overlay.modal: Rectangle { color: "#AA05070B" }
 
-        function addAction(type, value, delayAfter) {
+        function addAction(type, value, delayAfter, enabled) {
             actionModel.append({
                 "action_type": type || "open_url",
                 "value": value || "",
                 "delay_after": Number(delayAfter || 0),
-                "enabled": true
+                "enabled": enabled === undefined ? true : Boolean(enabled)
             })
+        }
+
+        function collectActions() {
+            var actions = []
+            for (var i = 0; i < actionModel.count; ++i) {
+                var item = actionModel.get(i)
+                actions.push({
+                    "action_type": item.action_type,
+                    "value": item.value,
+                    "delay_after": Number(item.delay_after || 0),
+                    "enabled": Boolean(item.enabled)
+                })
+            }
+            return actions
+        }
+
+        function collectActionsJson() {
+            return JSON.stringify(collectActions())
+        }
+
+        function duplicateAction(index) {
+            if (index < 0 || index >= actionModel.count)
+                return
+            var item = actionModel.get(index)
+            actionModel.insert(index + 1, {
+                "action_type": item.action_type,
+                "value": item.value,
+                "delay_after": Number(item.delay_after || 0),
+                "enabled": Boolean(item.enabled)
+            })
+        }
+
+        function moveAction(from, to) {
+            if (from < 0 || to < 0 || from >= actionModel.count || to >= actionModel.count || from === to)
+                return
+            actionModel.move(from, to, 1)
+            root.testedStepIndex = -1
+            root.testedStepState = ""
+            root.testedStepMessage = ""
         }
 
         function actionIndex(type) {
@@ -632,18 +725,22 @@ ApplicationWindow {
             if (root.recordedActions && root.recordedActions.length > 0) {
                 for (var recordedIndex = 0; recordedIndex < root.recordedActions.length; ++recordedIndex) {
                     var recordedStep = root.recordedActions[recordedIndex]
-                    addAction(recordedStep.action_type, recordedStep.value, recordedStep.delay_after)
+                    addAction(recordedStep.action_type, recordedStep.value, recordedStep.delay_after, recordedStep.enabled)
                 }
             } else if (command && command.actions && command.actions.length > 0) {
                 for (var i = 0; i < command.actions.length; ++i) {
                     var step = command.actions[i]
-                    addAction(step.action_type, step.value, step.delay_after)
+                    addAction(step.action_type, step.value, step.delay_after, step.enabled)
                 }
             } else {
                 addAction("open_url", "", 0)
             }
             root.recordedActions = null
             root.recordingDraft = null
+            root.testedStepIndex = -1
+            root.testedStepState = ""
+            root.testedStepMessage = ""
+            root.scenarioTestMessage = ""
             nameField.forceActiveFocus()
         }
 
@@ -732,11 +829,21 @@ ApplicationWindow {
                     required property string action_type
                     required property string value
                     required property real delay_after
+                    property bool stepEnabled: model.enabled
+                    property bool testSelected: root.testedStepIndex === actionCard.index
                     width: actionsList.width - (actionsList.ScrollBar.vertical.visible ? 12 : 0)
-                    height: 126
-                    radius: 13
-                    color: "#151A25"
-                    border.color: "#252C3A"
+                    height: 154
+                    radius: 14
+                    color: actionHover.hovered ? "#181E2A" : "#151A25"
+                    opacity: stepEnabled ? 1 : 0.55
+                    border.width: testSelected || backend.testingActionIndex === actionCard.index ? 1.5 : 1
+                    border.color: backend.testingActionIndex === actionCard.index
+                        ? root.accent
+                        : testSelected
+                            ? (root.testedStepState === "success" ? "#43D17C" : "#FF6B7A")
+                            : "#252C3A"
+                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Behavior on border.color { ColorAnimation { duration: 150 } }
 
                     ColumnLayout {
                         anchors.fill: parent
@@ -745,17 +852,23 @@ ApplicationWindow {
 
                         RowLayout {
                             Layout.fillWidth: true
-                            spacing: 8
+                            spacing: 7
 
                             Rectangle {
-                                width: 25
-                                height: 25
-                                radius: 8
-                                color: "#211B3B"
+                                width: 27
+                                height: 27
+                                radius: 9
+                                color: actionCard.testSelected
+                                    ? (root.testedStepState === "success" ? "#193529" : "#3A2029")
+                                    : "#211B3B"
                                 Text {
                                     anchors.centerIn: parent
-                                    text: actionCard.index + 1
-                                    color: root.accentSoft
+                                    text: actionCard.testSelected
+                                        ? (root.testedStepState === "success" ? "✓" : "!")
+                                        : actionCard.index + 1
+                                    color: actionCard.testSelected
+                                        ? (root.testedStepState === "success" ? "#62E39B" : "#FF8C99")
+                                        : root.accentSoft
                                     font.pixelSize: 11
                                     font.bold: true
                                 }
@@ -769,7 +882,10 @@ ApplicationWindow {
                                 valueRole: "value"
                                 model: editor.actionChoices
                                 currentIndex: editor.actionIndex(actionCard.action_type)
-                                onActivated: actionModel.setProperty(actionCard.index, "action_type", currentValue)
+                                onActivated: {
+                                    actionModel.setProperty(actionCard.index, "action_type", currentValue)
+                                    root.testedStepIndex = -1
+                                }
                                 contentItem: Text {
                                     leftPadding: 12
                                     text: stepType.displayText
@@ -802,13 +918,43 @@ ApplicationWindow {
                             }
 
                             ToolButton {
-                                id: removeStepButton
-                                visible: actionModel.count > 1
-                                text: "×"
+                                id: testStepButton
                                 implicitWidth: 34
                                 implicitHeight: 34
+                                enabled: actionCard.stepEnabled && !backend.testingScenario && backend.testingActionIndex < 0
+                                text: backend.testingActionIndex === actionCard.index ? "…" : "▶"
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Проверить этот шаг"
+                                onClicked: backend.testAction(actionCard.index, stepType.currentValue, stepValue.text)
+                                background: Rectangle { color: testStepButton.hovered ? "#222A39" : "transparent"; radius: 10 }
+                                contentItem: Text { text: testStepButton.text; color: testStepButton.enabled ? "#9DD8FF" : "#586273"; font.pixelSize: 13; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                            }
+
+                            ToolButton {
+                                id: duplicateStepButton
+                                implicitWidth: 34
+                                implicitHeight: 34
+                                text: "⧉"
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Дублировать шаг"
+                                onClicked: editor.duplicateAction(actionCard.index)
+                                background: Rectangle { color: duplicateStepButton.hovered ? "#222A39" : "transparent"; radius: 10 }
+                                contentItem: Text { text: duplicateStepButton.text; color: root.textMuted; font.pixelSize: 16; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                            }
+
+                            ToolButton {
+                                id: removeStepButton
+                                visible: actionModel.count > 1
+                                implicitWidth: 34
+                                implicitHeight: 34
+                                text: "×"
                                 font.pixelSize: 20
-                                onClicked: actionModel.remove(actionCard.index)
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Удалить шаг"
+                                onClicked: {
+                                    actionModel.remove(actionCard.index)
+                                    root.testedStepIndex = -1
+                                }
                                 background: Rectangle { color: removeStepButton.hovered ? "#30202A" : "transparent"; radius: 10 }
                                 contentItem: Text { text: removeStepButton.text; color: "#D88A98"; font: removeStepButton.font; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                             }
@@ -825,7 +971,10 @@ ApplicationWindow {
                                 Layout.alignment: Qt.AlignBottom
                                 text: actionCard.value
                                 placeholderText: editor.actionHint(stepType.currentValue)
-                                onTextEdited: actionModel.setProperty(actionCard.index, "value", text)
+                                onTextEdited: {
+                                    actionModel.setProperty(actionCard.index, "value", text)
+                                    root.testedStepIndex = -1
+                                }
                             }
 
                             ColumnLayout {
@@ -834,7 +983,6 @@ ApplicationWindow {
                                 Layout.maximumWidth: 82
                                 Layout.alignment: Qt.AlignBottom
                                 spacing: 2
-
                                 Text {
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 12
@@ -844,7 +992,6 @@ ApplicationWindow {
                                     font.pixelSize: 9
                                     verticalAlignment: Text.AlignVCenter
                                 }
-
                                 AppTextField {
                                     id: stepDelay
                                     Layout.fillWidth: true
@@ -859,7 +1006,81 @@ ApplicationWindow {
                                 }
                             }
                         }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            CheckBox {
+                                id: stepEnabledCheck
+                                checked: actionCard.stepEnabled
+                                text: "Включён"
+                                onToggled: actionModel.setProperty(actionCard.index, "enabled", checked)
+                                indicator: Rectangle {
+                                    implicitWidth: 18
+                                    implicitHeight: 18
+                                    radius: 6
+                                    color: stepEnabledCheck.checked ? root.accent : "#0D111A"
+                                    border.color: stepEnabledCheck.checked ? root.accent : root.line
+                                    Text { anchors.centerIn: parent; visible: stepEnabledCheck.checked; text: "✓"; color: "white"; font.pixelSize: 11; font.bold: true }
+                                }
+                                contentItem: Text { leftPadding: 25; text: stepEnabledCheck.text; color: root.textMuted; font.pixelSize: 10; verticalAlignment: Text.AlignVCenter }
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                visible: actionCard.testSelected
+                                text: root.testedStepMessage
+                                color: root.testedStepState === "success" ? "#62E39B" : "#FF8C99"
+                                font.pixelSize: 9
+                                elide: Text.ElideRight
+                            }
+                            ToolButton {
+                                id: moveUpButton
+                                implicitWidth: 30
+                                implicitHeight: 26
+                                enabled: actionCard.index > 0
+                                text: "↑"
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Переместить выше"
+                                onClicked: editor.moveAction(actionCard.index, actionCard.index - 1)
+                                background: Rectangle { color: moveUpButton.hovered ? "#222A39" : "transparent"; radius: 8 }
+                                contentItem: Text { text: moveUpButton.text; color: moveUpButton.enabled ? root.textMuted : "#424A58"; font.pixelSize: 15; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                            }
+                            ToolButton {
+                                id: moveDownButton
+                                implicitWidth: 30
+                                implicitHeight: 26
+                                enabled: actionCard.index < actionModel.count - 1
+                                text: "↓"
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Переместить ниже"
+                                onClicked: editor.moveAction(actionCard.index, actionCard.index + 1)
+                                background: Rectangle { color: moveDownButton.hovered ? "#222A39" : "transparent"; radius: 8 }
+                                contentItem: Text { text: moveDownButton.text; color: moveDownButton.enabled ? root.textMuted : "#424A58"; font.pixelSize: 15; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                            }
+                        }
                     }
+
+                    HoverHandler { id: actionHover }
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: root.scenarioTestMessage.length > 0 ? 38 : 0
+                visible: root.scenarioTestMessage.length > 0
+                radius: 11
+                color: root.scenarioTestMessage.indexOf("Ошибка") >= 0 || root.scenarioTestMessage.indexOf("остановлена") >= 0 ? "#2A1820" : "#162820"
+                border.color: root.scenarioTestMessage.indexOf("Ошибка") >= 0 || root.scenarioTestMessage.indexOf("остановлена") >= 0 ? "#5A2935" : "#26533B"
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    Text {
+                        text: root.scenarioTestMessage.indexOf("Ошибка") >= 0 || root.scenarioTestMessage.indexOf("остановлена") >= 0 ? "!" : "✓"
+                        color: root.scenarioTestMessage.indexOf("Ошибка") >= 0 || root.scenarioTestMessage.indexOf("остановлена") >= 0 ? "#FF8C99" : "#62E39B"
+                        font.bold: true
+                    }
+                    Text { Layout.fillWidth: true; text: root.scenarioTestMessage; color: root.textMain; font.pixelSize: 10; elide: Text.ElideRight }
                 }
             }
 
@@ -915,6 +1136,8 @@ ApplicationWindow {
                 }
             }
 
+            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.line }
+
             RowLayout {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 42
@@ -931,6 +1154,17 @@ ApplicationWindow {
                         editor.close()
                     }
                 }
+                SoftButton {
+                    Layout.preferredHeight: 42
+                    Layout.minimumWidth: 118
+                    Layout.alignment: Qt.AlignVCenter
+                    enabled: !backend.testingScenario && backend.testingActionIndex < 0
+                    text: backend.testingScenario ? "Проверяю…" : "▶  Проверить всё"
+                    onClicked: {
+                        root.scenarioTestMessage = "Запускаю проверку сценария…"
+                        backend.testScenario(editor.collectActionsJson())
+                    }
+                }
                 Item { Layout.fillWidth: true }
                 SoftButton {
                     Layout.preferredHeight: 42
@@ -945,21 +1179,11 @@ ApplicationWindow {
                     Layout.alignment: Qt.AlignVCenter
                     text: "Сохранить"
                     onClicked: {
-                        var actions = []
-                        for (var i = 0; i < actionModel.count; ++i) {
-                            var item = actionModel.get(i)
-                            actions.push({
-                                "action_type": item.action_type,
-                                "value": item.value,
-                                "delay_after": Number(item.delay_after || 0),
-                                "enabled": true
-                            })
-                        }
                         var saved = backend.saveCommand(
                             root.editingCommand ? root.editingCommand.id : "",
                             nameField.text,
                             phrasesField.text,
-                            JSON.stringify(actions),
+                            editor.collectActionsJson(),
                             confirmSwitch.checked
                         )
                         if (saved)
@@ -1047,8 +1271,67 @@ ApplicationWindow {
         }
     }
 
+    Window {
+        id: recordingOverlay
+        width: 330
+        height: 78
+        visible: backend.recording
+        transientParent: null
+        color: "transparent"
+        flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+        x: Math.max(20, Screen.width - width - 28)
+        y: Math.max(20, Screen.height - height - 72)
+
+        Rectangle {
+            anchors.fill: parent
+            radius: 18
+            color: "#151A25"
+            border.color: "#56312B"
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 16
+                anchors.rightMargin: 12
+                spacing: 11
+                Rectangle {
+                    width: 12
+                    height: 12
+                    radius: 6
+                    color: "#FF765E"
+                    SequentialAnimation on opacity {
+                        loops: Animation.Infinite
+                        running: recordingOverlay.visible
+                        NumberAnimation { to: 0.3; duration: 520 }
+                        NumberAnimation { to: 1; duration: 520 }
+                    }
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 3
+                    Text { text: "Идёт запись действий"; color: root.textMain; font.pixelSize: 13; font.weight: Font.DemiBold }
+                    Text { text: "Ctrl + Shift + F12 для остановки"; color: root.textMuted; font.pixelSize: 10 }
+                }
+                SoftButton {
+                    Layout.preferredHeight: 36
+                    text: "Стоп"
+                    onClicked: backend.stopRecording()
+                }
+            }
+        }
+    }
+
     Connections {
         target: backend
+        function onActionTestResult(index, success, message) {
+            root.testedStepIndex = index
+            root.testedStepState = success ? "success" : "error"
+            root.testedStepMessage = message
+        }
+        function onScenarioTestProgress(current, total, message) {
+            root.scenarioTestMessage = "Шаг " + current + " из " + total + ": " + message
+        }
+        function onScenarioTestFinished(success, message) {
+            root.scenarioTestMessage = success ? message : "Проверка остановлена: " + message
+        }
         function onConfirmationRequested(name, value) {
             confirmDialog.commandName = name
             confirmDialog.commandValue = value

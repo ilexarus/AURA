@@ -1,91 +1,54 @@
-# Настройка автоматических обновлений AURA
+# Automatic update setup
 
-## Вариант 1. Полностью автоматическая публикация через GitHub Actions
+AURA checks the latest stable GitHub Release and expects two attached files:
 
-### 1. Создайте публичный репозиторий GitHub
+- `AURA-Setup-X.Y.Z.exe`
+- `AURA-Setup-X.Y.Z.exe.sha256`
 
-Репозиторий должен быть публичным. AURA не хранит токены GitHub внутри приложения.
+## First repository setup
 
-### 2. Загрузите проект в корень репозитория
+1. Upload the project contents to the repository root.
+2. Keep `.github/workflows/release.yml` in place.
+3. Keep only one release workflow file.
+4. Make the repository public, or adapt the updater for authenticated access.
 
-В корне должны находиться `app.py`, `VERSION.txt`, папки `aura`, `ui`, `installer` и `.github`.
+## Publish a version
 
-### 3. Опубликуйте первую версию
+Commit and push the source changes to `main`, then create a new release tag:
 
-```bash
-git add .
-git commit -m "AURA 0.4.0"
-git tag v0.4.0
-git push origin main
-git push origin v0.4.0
+```text
+v0.6.0
 ```
 
-Workflow `.github/workflows/release.yml` автоматически:
+Target the `main` branch and publish the release as `Latest`.
 
-1. подставит имя текущего репозитория в `update_config.json`;
-2. возьмёт версию из Git-тега;
-3. соберёт `AURA.exe` и `AURAUpdater.exe`;
-4. создаст установщик Inno Setup;
-5. посчитает SHA-256;
-6. создаст GitHub Release и приложит оба файла.
+The GitHub Actions workflow will:
 
-Скачайте установщик из первого Release и передайте пользователям только один раз.
+1. Set the application version from the tag.
+2. Configure the current GitHub repository for updates.
+3. Run tests.
+4. Generate the local voice pack.
+5. Build AURA and AURAUpdater.
+6. Build the Inno Setup installer.
+7. Generate SHA-256.
+8. Attach both files to the release.
 
-### 4. Выпускайте следующие версии
+## Publish later updates
 
-После изменений создайте новый тег:
+Use a new tag every time, for example:
 
-```bash
-git add .
-git commit -m "AURA 0.4.1"
-git tag v0.4.1
-git push origin main
-git push origin v0.4.1
+```text
+v0.6.1
+v0.6.2
+v0.7.0
 ```
 
-Через некоторое время установленная AURA сама увидит новую версию, скачает её и покажет кнопку установки.
+Do not reuse an old tag or replace an already distributed installer under the same version.
 
-## Вариант 2. Сборка и публикация на своём Windows-компьютере
+## User data
 
-### Первоначальная настройка
+User commands and settings are stored in `%APPDATA%\AURA`, outside the installation directory. Installing a new version should not remove them.
 
-1. Запустите `CONFIGURE_UPDATES.cmd`.
-2. Введите репозиторий в формате `имя/репозиторий`.
-3. Установите Inno Setup 6.
-4. Установите GitHub CLI.
-5. Выполните `gh auth login`.
+## Important updater note
 
-### Выпуск версии
-
-1. Измените номер в `VERSION.txt`, например на `0.4.1`.
-2. Запустите `PUBLISH_RELEASE.cmd`.
-
-Скрипт соберёт установщик, создаст SHA-256 и загрузит оба файла в GitHub Release.
-
-## Имена файлов в Release
-
-Для версии `0.4.1` должны существовать ровно два файла:
-
-- `AURA-Setup-0.4.1.exe`;
-- `AURA-Setup-0.4.1.exe.sha256`.
-
-Не меняйте этот формат без одновременного изменения `update_config.json`.
-
-## Как работает обновление у пользователя
-
-1. AURA проверяет последний опубликованный стабильный Release при запуске и затем каждые 12 часов.
-2. Если версия новее, установщик скачивается в `%LOCALAPPDATA%\AURA\updates`.
-3. AURA сравнивает SHA-256.
-4. После успешной проверки появляется окно с кнопками `Позже` и `Установить`.
-5. При установке запускается отдельный `AURAUpdater.exe`.
-6. Он ждёт закрытия AURA, тихо запускает установщик и открывает новую версию.
-
-## Проверка перед публикацией
-
-Перед выпуском рекомендуется:
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-Также проверьте установку на отдельной учётной записи Windows и обновление с предыдущей версии.
+Users must install at least one build that contains the corrected updater. Source mode started with `START_AURA.cmd` can check updates, but automatic replacement is intended for the installed build.

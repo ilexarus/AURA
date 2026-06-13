@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Property, QThread, QTimer, Signal, Slot
@@ -82,6 +83,60 @@ class ExecutionWorker(QObject):
             self.failed.emit(str(exc))
         except Exception as exc:
             logging.exception("Unexpected command execution failure")
+            self.failed.emit(f"Непредвиденная ошибка: {exc}")
+        finally:
+            self.done.emit()
+
+
+class ActionTestWorker(QObject):
+    finished = Signal(int, str)
+    failed = Signal(int, str)
+    done = Signal()
+
+    def __init__(self, index: int, step: ActionStep) -> None:
+        super().__init__()
+        self.index = index
+        self.step = step
+        self.executor = ActionExecutor()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.executor.reset_stop()
+            self.executor.execute_step(self.step)
+            self.finished.emit(self.index, f"Шаг {self.index + 1} выполнен")
+        except (ActionError, OSError, ValueError) as exc:
+            self.failed.emit(self.index, str(exc))
+        except Exception as exc:
+            logging.exception("Unexpected action test failure")
+            self.failed.emit(self.index, f"Непредвиденная ошибка: {exc}")
+        finally:
+            self.done.emit()
+
+
+class ScenarioTestWorker(QObject):
+    progress = Signal(int, int, str)
+    finished = Signal(str)
+    failed = Signal(str)
+    done = Signal()
+
+    def __init__(self, command: VoiceCommand) -> None:
+        super().__init__()
+        self.command = command
+        self.executor = ActionExecutor()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result = self.executor.execute(
+                self.command,
+                lambda current, total, text: self.progress.emit(current, total, text),
+            )
+            self.finished.emit(result)
+        except (ActionError, OSError, ValueError) as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:
+            logging.exception("Unexpected scenario test failure")
             self.failed.emit(f"Непредвиденная ошибка: {exc}")
         finally:
             self.done.emit()
@@ -178,6 +233,10 @@ class AssistantBackend(QObject):
     recordingReady = Signal(str)
     hotkeyTriggered = Signal()
     stopHotkeyTriggered = Signal()
+    actionTestResult = Signal(int, bool, str)
+    scenarioTestProgress = Signal(int, int, str)
+    scenarioTestFinished = Signal(bool, str)
+    testingStateChanged = Signal()
 
     def __init__(
         self,
@@ -219,6 +278,13 @@ class AssistantBackend(QObject):
         self._recording_thread: QThread | None = None
         self._recording_worker: RecordingWorker | None = None
         self._recorder: ActionRecorder | None = None
+
+        self._testing_action_index = -1
+        self._action_test_thread: QThread | None = None
+        self._action_test_worker: ActionTestWorker | None = None
+        self._testing_scenario = False
+        self._scenario_test_thread: QThread | None = None
+        self._scenario_test_worker: ScenarioTestWorker | None = None
 
         self._wake_enabled = bool(self._settings.wake_enabled)
         self._wake_listening = False
@@ -309,6 +375,14 @@ class AssistantBackend(QObject):
     def recording(self) -> bool:
         return self._recording
 
+    @Property(int, notify=testingStateChanged)
+    def testingActionIndex(self) -> int:
+        return self._testing_action_index
+
+    @Property(bool, notify=testingStateChanged)
+    def testingScenario(self) -> bool:
+        return self._testing_scenario
+
     @Property(bool, notify=wakeStateChanged)
     def wakeEnabled(self) -> bool:
         return self._wake_enabled
@@ -331,7 +405,7 @@ class AssistantBackend(QObject):
 
     @Property("QVariantList", notify=historyChanged)
     def history(self) -> list[dict[str, str]]:
-        return self._history[:10]
+        return self._history[:20]
 
     @Property(str, constant=True)
     def dataPath(self) -> str:
@@ -513,6 +587,121 @@ class AssistantBackend(QObject):
         self.transcriptChanged.emit()
         self._handle_transcript(clean)
 
+    @Slot(int, str, str)
+    def testAction(self, index: int, action_type: str, value: str) -> None:
+        if self._busy or self._recording or self._listening or self._testing_scenario or self._action_test_thread is not None:
+            self._set_status("Сначала завершите текущее действие")
+            return
+        if action_type not in ACTION_LABELS:
+            self.actionTestResult.emit(index, False, "Неизвестное действие")
+            return
+        if action_type == "shell":
+            message = "Системные команды проверяются только после сохранения и подтверждения"
+            self._set_status(message)
+            self.actionTestResult.emit(index, False, message)
+            return
+        step = ActionStep(action_type=action_type, value=value)
+        thread = QThread(self)
+        worker = ActionTestWorker(index, step)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_action_test_finished)
+        worker.failed.connect(self._on_action_test_failed)
+        worker.done.connect(thread.quit)
+        worker.done.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._action_test_cleanup)
+        self._testing_action_index = index
+        self._action_test_thread = thread
+        self._action_test_worker = worker
+        self.testingStateChanged.emit()
+        self._set_status(f"Проверяю шаг {index + 1}…")
+        thread.start()
+
+    @Slot(str)
+    def testScenario(self, actions_json: str) -> None:
+        if self._busy or self._recording or self._listening or self._testing_scenario or self._action_test_thread is not None:
+            self._set_status("Сначала завершите текущее действие")
+            return
+        try:
+            raw_actions = json.loads(actions_json)
+            if not isinstance(raw_actions, list):
+                raise TypeError
+            actions = [ActionStep.from_dict(item) for item in raw_actions if isinstance(item, dict)]
+        except (json.JSONDecodeError, TypeError):
+            actions = []
+        if not actions:
+            self._set_status("Добавьте хотя бы одно действие")
+            self.scenarioTestFinished.emit(False, "Нет действий для проверки")
+            return
+        if any(step.action_type == "shell" for step in actions):
+            message = "Сценарий с системной командой нельзя запускать в тестовом режиме"
+            self._set_status(message)
+            self.scenarioTestFinished.emit(False, message)
+            return
+        self._stop_wake_listener()
+        command = VoiceCommand("Проверка сценария", ["test"], actions)
+        thread = QThread(self)
+        worker = ScenarioTestWorker(command)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_scenario_test_progress)
+        worker.finished.connect(self._on_scenario_test_finished)
+        worker.failed.connect(self._on_scenario_test_failed)
+        worker.done.connect(thread.quit)
+        worker.done.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._scenario_test_cleanup)
+        self._testing_scenario = True
+        self._scenario_test_thread = thread
+        self._scenario_test_worker = worker
+        self.testingStateChanged.emit()
+        self._set_busy(True)
+        self._set_status("Проверяю сценарий…")
+        thread.start()
+
+    @Slot(int, str)
+    def _on_action_test_finished(self, index: int, message: str) -> None:
+        self._set_status(message)
+        self.actionTestResult.emit(index, True, message)
+
+    @Slot(int, str)
+    def _on_action_test_failed(self, index: int, message: str) -> None:
+        self._set_status(f"Ошибка шага {index + 1}: {message}")
+        self.actionTestResult.emit(index, False, message)
+
+    @Slot()
+    def _action_test_cleanup(self) -> None:
+        self._action_test_thread = None
+        self._action_test_worker = None
+        self._testing_action_index = -1
+        self.testingStateChanged.emit()
+
+    @Slot(int, int, str)
+    def _on_scenario_test_progress(self, current: int, total: int, text: str) -> None:
+        self._set_status(f"Проверка {current}/{total}: {text}")
+        self.scenarioTestProgress.emit(current, total, text)
+
+    @Slot(str)
+    def _on_scenario_test_finished(self, _message: str) -> None:
+        message = "Все шаги выполнены успешно"
+        self._set_status(message)
+        self.scenarioTestFinished.emit(True, message)
+
+    @Slot(str)
+    def _on_scenario_test_failed(self, message: str) -> None:
+        self._set_status(f"Проверка остановлена: {message}")
+        self.scenarioTestFinished.emit(False, message)
+
+    @Slot()
+    def _scenario_test_cleanup(self) -> None:
+        self._scenario_test_thread = None
+        self._scenario_test_worker = None
+        self._testing_scenario = False
+        self.testingStateChanged.emit()
+        self._set_busy(False)
+        QTimer.singleShot(180, self.startWakeListening)
+
     @Slot(str, str, str, str, bool, result=bool)
     def saveCommand(self, command_id: str, name: str, phrases_text: str, actions_json: str, require_confirmation: bool) -> bool:
         phrases = [item.strip()[:160] for item in phrases_text.replace("\n", ",").split(",") if item.strip()][:20]
@@ -580,6 +769,14 @@ class AssistantBackend(QObject):
         if self._recording:
             self.stopRecording()
             return
+        if self._action_test_worker is not None:
+            self._action_test_worker.executor.stop()
+            self._set_status("Останавливаю проверку шага…")
+            return
+        if self._testing_scenario and self._scenario_test_worker is not None:
+            self._scenario_test_worker.executor.stop()
+            self._set_status("Останавливаю проверку…")
+            return
         if self._busy:
             self.executor.stop()
             self._set_status("Останавливаю сценарий…")
@@ -639,11 +836,21 @@ class AssistantBackend(QObject):
     def shutdown(self) -> None:
         self._unregister_hotkeys()
         self.executor.stop()
+        if self._action_test_worker is not None:
+            self._action_test_worker.executor.stop()
+        if self._scenario_test_worker is not None:
+            self._scenario_test_worker.executor.stop()
         self._voice_queue.clear()
         self._stop_wake_listener()
         if self._recorder is not None:
             self._recorder.stop()
-        for thread in (self._wake_thread, self._recording_thread, self._voice_thread):
+        for thread in (
+            self._wake_thread,
+            self._recording_thread,
+            self._voice_thread,
+            self._action_test_thread,
+            self._scenario_test_thread,
+        ):
             if thread is not None and thread.isRunning():
                 thread.quit()
                 thread.wait(1200)
@@ -1043,8 +1250,15 @@ class AssistantBackend(QObject):
         self.updateStateChanged.emit()
 
     def _add_history(self, phrase: str, result: str) -> None:
-        self._history.insert(0, {"phrase": phrase, "result": result})
-        self._history = self._history[:10]
+        normalized = result.casefold()
+        tone = "error" if "ошиб" in normalized or "не найден" in normalized else "warning" if "отмен" in normalized else "success"
+        self._history.insert(0, {
+            "phrase": phrase,
+            "result": result,
+            "time": datetime.now().strftime("%H:%M"),
+            "tone": tone,
+        })
+        self._history = self._history[:20]
         self.historyChanged.emit()
 
     def _register_hotkeys(self) -> None:

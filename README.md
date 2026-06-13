@@ -1,76 +1,77 @@
-# AURA 0.3.1
+# AURA 0.6.0
 
-Голосовой ассистент для Windows с минималистичным интерфейсом и простым конструктором команд.
+A Windows voice assistant with a minimal interface, local wake phrase activation, visual command builder, action recording, and automatic updates.
 
-## Запуск
+## Main improvements in 0.6.0
 
-1. Полностью распакуйте архив в обычную папку, например `C:\AURA`.
-2. Запустите `START_AURA.cmd`.
-3. При первом запуске не закрывайте консоль, пока устанавливаются компоненты.
-4. После установки откроется AURA.
+- Search commands by name, voice phrase, or action.
+- Test one action directly from its card.
+- Test the complete unsaved scenario before saving.
+- Duplicate, disable, and reorder actions.
+- See a clear green or red result after testing a step.
+- Use the compact recording panel while AURA records mouse and keyboard actions.
+- Read a more useful recent activity list with time and status.
+- Hear the corrected response: `Я не нашёл такую команду`.
 
-Если установка была прервана, запустите `RESET_AND_START.cmd`.
+The current colors, dark theme, voice sphere, and overall visual identity are preserved.
 
-## Что изменилось
+## Run from source
 
-Основной интерфейс, цвета, расположение элементов и анимация голосовой сферы сохранены.
+1. Extract the project to a normal folder, for example `C:\AURA`.
+2. Run `START_AURA.cmd`.
+3. Wait for the first dependency installation to finish.
+4. To reset a broken environment, run `RESET_AND_START.cmd`.
 
-Теперь одна голосовая команда может выполнять несколько действий подряд. В окне создания команды нажмите `Добавить`, настройте шаги и при необходимости укажите паузу после каждого шага.
+Python 3.11, 3.12, or 3.13 can be used for development.
 
-Пример сценария:
+## Voice activation
 
-1. Открыть почту.
-2. Подождать одну секунду.
-3. Запустить проводник.
-4. Нажать сочетание клавиш.
+AURA waits locally for the phrase `Аура` using Vosk. The wake phrase is not sent to an online service.
 
-## Доступные действия
+After activation, the command is recognized through the configured speech pipeline. You can say the phrase and command together, for example:
 
-- открыть сайт;
-- открыть программу;
-- открыть файл или папку;
-- нажать сочетание клавиш;
-- нажать отдельную клавишу;
-- вставить текст;
-- подождать указанное число секунд;
-- выполнить системную команду с обязательным подтверждением.
+`Аура, открой браузер`
 
-## Дополнительные улучшения
+Hotkey: `Ctrl + Shift + Space`.
 
-- действия выполняются в отдельном потоке, поэтому окно не зависает;
-- старые команды автоматически переводятся в новый формат;
-- добавлен значок AURA в системный трей;
-- журнал приложения автоматически ограничивается по размеру;
-- повреждённый файл команд сохраняется как резервная копия;
-- системные команды всегда требуют подтверждения;
-- запускатели используют только ASCII и переносы Windows CRLF.
+Emergency stop: `Ctrl + Shift + F12`.
 
-## Голосовой режим
+## Voice responses
 
-Распознавание речи использует Google Speech Recognition и требует подключения к интернету. Для доступа к микрофону нужен PyAudio. Если PyAudio не установится, приложение всё равно запустится в текстовом режиме.
+Generate the local Silero voice pack with:
 
-Горячая клавиша: `Ctrl + Shift + Space`.
+`GENERATE_SILERO_VOICE.cmd`
 
-## Хранение данных
+For a profile intended for commercial use, use:
 
-Команды сохраняются локально:
+`GENERATE_SILERO_VOICE_MIT.cmd`
 
-`%APPDATA%\AURA\commands.json`
+Review `VOICE_LICENSE.md` before distribution.
 
-Журнал приложения:
+## User data
 
-`%APPDATA%\AURA\aura.log`
+Commands and settings are stored outside the program folder:
 
-Журнал установки и запуска находится рядом с программой:
+`%APPDATA%\AURA`
 
-`launcher.log`
+This allows updates to replace application files without deleting user commands.
 
-## Сборка Windows-приложения
+## Build
 
-`BUILD_PORTABLE.cmd` создаёт portable-сборку в `dist\AURA`.
+Portable build:
 
-`BUILD_INSTALLER.cmd` сначала создаёт portable-сборку, затем собирает `AURA-Setup-0.3.1.exe`. Для второго шага нужен Inno Setup 6.
+`BUILD_PORTABLE.cmd`
 
-## Безопасность
+Windows installer:
 
-Системные команды выполняются только после подтверждения. Не добавляйте команды, полученные из неизвестных источников. Удаление файлов, изменение реестра и запуск загруженных программ могут быть опасны.
+`BUILD_INSTALLER.cmd`
+
+The release workflow in `.github/workflows/release.yml` builds and attaches the installer to a GitHub Release created from a tag such as `v0.6.0`.
+
+## Automatic updates
+
+Installed builds check the latest stable GitHub Release, download the matching installer and SHA-256 file, verify the checksum, and offer installation. Source mode launched through `START_AURA.cmd` does not silently replace itself.
+
+## Safety
+
+System commands require confirmation. Scenario testing refuses to run system command steps. Review imported commands before running them.
