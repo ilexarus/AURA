@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-#define MyAppVersion "0.5.6"
+#define MyAppVersion "0.5.8"
 #endif
 #define MyAppName "AURA"
 #define MyAppPublisher "AURA"

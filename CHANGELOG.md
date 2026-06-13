@@ -1,11 +1,19 @@
-# AURA 0.5.6
+# Changelog
 
-- Выровнены кнопки в редакторе команд.
-- Кнопки «Отмена» и «Сохранить» теперь имеют одинаковую высоту и вертикальную позицию.
-- Кнопки «Записать» и «Добавить» получили одинаковую ширину и высоту.
-- Нижняя панель больше не выходит за границы диалога при масштабировании Windows.
-- Диалог создания команды адаптируется к размеру окна.
-- Внешний стиль и цветовая схема сохранены.
+## 0.5.8
+
+- Fixed the silent updater command line on Windows.
+- Removed embedded quotation marks from the Inno Setup `/LOG` argument.
+- Added a visible error dialog when background installation fails.
+- Added automatic restart retries after a successful update.
+- Added updater regression tests.
+
+## 0.5.7
+
+- Fixed the Windows-only double-click recorder unit test.
+- Removed the duplicate GitHub Actions workflow from the source package.
+- Added release concurrency protection.
+- Tests now run before the large PyTorch download and voice generation.
 
 # AURA 0.3.1
 
