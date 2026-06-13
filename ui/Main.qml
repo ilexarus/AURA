@@ -30,6 +30,10 @@ ApplicationWindow {
     property string scenarioTestMessage: ""
     property color assistantStateColor: backend.recording ? "#FF9A62" : backend.listening ? "#65B8FF" : backend.busy ? "#8A6BFF" : backend.voiceSpeaking ? "#43D17C" : backend.wakeListening ? root.accent : "#536071"
     property string assistantStateLabel: backend.recording ? "Запись действий" : backend.listening ? "Микрофон активен" : backend.busy ? "Выполняю действие" : backend.voiceSpeaking ? "Отвечаю" : backend.wakeListening ? "Жду фразу «Аура»" : "Готов к работе"
+    property bool orbRecognizing: backend.listening && backend.status.toLowerCase().indexOf("распозна") >= 0
+    property real animationStrength: backend.animationIntensity === "low" ? 0.58 : backend.animationIntensity === "high" ? 1.28 : 1.0
+    property real microphoneVisualLevel: backend.microphoneReactiveAnimation ? backend.audioLevel / 100.0 : 0.0
+    property bool motionEnabled: !backend.reduceMotion
 
     font.family: "Segoe UI"
 
@@ -448,81 +452,283 @@ ApplicationWindow {
                             spacing: 15
 
                             Item {
+                                id: orbStage
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
-                                Layout.minimumHeight: 280
+                                Layout.minimumHeight: 300
+
+                                property real breathScale: 1.0
+                                property real eventScale: 1.0
+                                property color eventColor: root.assistantStateColor
+                                property real voiceLevel: backend.listening ? Math.max(root.microphoneVisualLevel, 0.06) : 0.0
+
+                                function prepareEvent(colorValue) {
+                                    eventColor = colorValue
+                                    eventRing.opacity = 0
+                                    eventRing.scale = 0.86
+                                    flashOverlay.opacity = 0
+                                    eventScale = 1
+                                    orbShake.x = 0
+                                }
+
+                                function playEvent(eventName) {
+                                    if (eventName === "wake") {
+                                        prepareEvent("#76C8FF")
+                                        root.motionEnabled ? wakeAnimation.restart() : reducedEventAnimation.restart()
+                                    } else if (eventName === "success") {
+                                        prepareEvent("#43D17C")
+                                        root.motionEnabled ? successAnimation.restart() : reducedEventAnimation.restart()
+                                    } else if (eventName === "error") {
+                                        prepareEvent("#FF6B72")
+                                        root.motionEnabled ? errorAnimation.restart() : reducedEventAnimation.restart()
+                                    } else if (eventName === "step") {
+                                        prepareEvent(root.accentSoft)
+                                        root.motionEnabled ? stepAnimation.restart() : reducedEventAnimation.restart()
+                                    }
+                                }
+
+                                transform: Translate { id: orbShake; x: 0 }
+                                scale: breathScale * eventScale
+
+                                SequentialAnimation on breathScale {
+                                    running: root.motionEnabled && !backend.listening && !backend.busy && !backend.recording && !backend.voiceSpeaking
+                                    loops: Animation.Infinite
+                                    NumberAnimation { to: 1.0 + 0.026 * root.animationStrength; duration: 1750; easing.type: Easing.InOutSine }
+                                    NumberAnimation { to: 1.0; duration: 1750; easing.type: Easing.InOutSine }
+                                }
+
+                                Rectangle {
+                                    id: ambientGlow
+                                    anchors.centerIn: parent
+                                    width: 278; height: 278; radius: 139
+                                    color: root.assistantStateColor
+                                    opacity: backend.listening || backend.busy ? 0.055 + orbStage.voiceLevel * 0.07 : 0.035
+                                    scale: 1 + orbStage.voiceLevel * 0.08 * root.animationStrength
+                                    Behavior on opacity { NumberAnimation { duration: 260 } }
+                                    Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                                }
+
+                                Rectangle {
+                                    id: eventRing
+                                    anchors.centerIn: parent
+                                    width: 224; height: 224; radius: 112
+                                    color: "transparent"
+                                    border.width: 2
+                                    border.color: orbStage.eventColor
+                                    opacity: 0
+                                    scale: 0.86
+                                }
 
                                 Rectangle {
                                     id: outerRing
                                     anchors.centerIn: parent
-                                    width: 238; height: 238; radius: 119
+                                    width: 242; height: 242; radius: 121
                                     color: "transparent"
-                                    border.width: 1
+                                    border.width: backend.listening || backend.busy ? 2 : 1
                                     border.color: root.assistantStateColor
-                                    opacity: backend.listening || backend.busy || backend.recording ? 0.9 : 0.55
-                                    scale: 1
-                                    SequentialAnimation on scale {
-                                        running: backend.listening || backend.busy
+                                    opacity: backend.listening || backend.busy || backend.recording ? 0.78 : 0.42
+                                    scale: 1 + orbStage.voiceLevel * 0.055 * root.animationStrength
+                                    Behavior on border.color { ColorAnimation { duration: 220 } }
+                                    Behavior on opacity { NumberAnimation { duration: 220 } }
+                                    Behavior on scale { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+                                }
+
+                                Item {
+                                    id: orbitSystem
+                                    anchors.centerIn: parent
+                                    width: 226; height: 226
+                                    visible: backend.busy || root.orbRecognizing || backend.voiceSpeaking
+                                    opacity: visible ? 0.95 : 0
+                                    Behavior on opacity { NumberAnimation { duration: 180 } }
+
+                                    RotationAnimation on rotation {
+                                        running: root.motionEnabled && orbitSystem.visible
+                                        from: 0
+                                        to: 360
                                         loops: Animation.Infinite
-                                        NumberAnimation { to: 1.11; duration: 950; easing.type: Easing.InOutSine }
-                                        NumberAnimation { to: 1; duration: 950; easing.type: Easing.InOutSine }
+                                        duration: backend.busy ? 1250 : root.orbRecognizing ? 950 : 1800
                                     }
-                                    SequentialAnimation on opacity {
-                                        running: backend.listening || backend.busy
-                                        loops: Animation.Infinite
-                                        NumberAnimation { to: 0.15; duration: 950 }
-                                        NumberAnimation { to: 0.85; duration: 950 }
+
+                                    Repeater {
+                                        model: 3
+                                        Rectangle {
+                                            required property int index
+                                            property real angle: index * Math.PI * 2 / 3
+                                            width: index === 0 ? 9 : 7
+                                            height: width
+                                            radius: width / 2
+                                            x: orbitSystem.width / 2 - width / 2 + Math.cos(angle) * 105
+                                            y: orbitSystem.height / 2 - height / 2 + Math.sin(angle) * 105
+                                            color: index === 0 ? "#E9E3FF" : root.assistantStateColor
+                                            opacity: index === 0 ? 1 : 0.68
+                                        }
                                     }
                                 }
 
                                 Rectangle {
+                                    id: shell
                                     anchors.centerIn: parent
-                                    width: 192; height: 192; radius: 96
-                                    color: "#121827"
+                                    width: 198; height: 198; radius: 99
+                                    color: "#111725"
                                     border.width: 1
-                                    border.color: root.assistantStateColor
+                                    border.color: Qt.lighter(root.assistantStateColor, 1.08)
+                                    scale: 1 + orbStage.voiceLevel * 0.032 * root.animationStrength
+                                    Behavior on border.color { ColorAnimation { duration: 220 } }
+                                    Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
 
                                     Rectangle {
-                                        id: orb
-                                        anchors.centerIn: parent
-                                        width: 152; height: 152; radius: 76
-                                        gradient: Gradient {
-                                            GradientStop { position: 0.0; color: backend.listening ? "#B49DFF" : "#8168E5" }
-                                            GradientStop { position: 0.48; color: backend.listening ? "#7251F4" : "#5339C8" }
-                                            GradientStop { position: 1.0; color: backend.listening ? "#2B185F" : "#24184D" }
-                                        }
-                                        scale: backend.listening ? 1.04 : 1
-                                        Behavior on scale { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
+                                        anchors.fill: parent
+                                        anchors.margins: 9
+                                        radius: width / 2
+                                        color: "transparent"
+                                        border.width: 1
+                                        border.color: "#22FFFFFF"
+                                    }
+                                }
 
-                                        Repeater {
-                                            model: 7
-                                            Rectangle {
-                                                required property int index
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                width: 4
-                                                radius: 2
-                                                height: backend.listening ? 18 + (index % 4) * 10 : 8 + (index % 3) * 3
-                                                x: orb.width / 2 - 2 + (index - 3) * 12
-                                                color: "white"
-                                                opacity: 0.9
-                                                Behavior on height { NumberAnimation { duration: 180 } }
-                                                SequentialAnimation on scale {
-                                                    running: backend.listening
-                                                    loops: Animation.Infinite
-                                                    PauseAnimation { duration: index * 55 }
-                                                    NumberAnimation { to: 1.5; duration: 240; easing.type: Easing.InOutSine }
-                                                    NumberAnimation { to: 0.7; duration: 300; easing.type: Easing.InOutSine }
-                                                    NumberAnimation { to: 1; duration: 220 }
-                                                }
+                                Rectangle {
+                                    id: orb
+                                    anchors.centerIn: parent
+                                    width: 156; height: 156; radius: 78
+                                    gradient: Gradient {
+                                        GradientStop {
+                                            position: 0.0
+                                            color: backend.recording ? "#FFC091" : backend.voiceSpeaking ? "#86E8AB" : backend.listening ? "#B8D7FF" : backend.busy ? "#B6A7FF" : "#9582F2"
+                                        }
+                                        GradientStop {
+                                            position: 0.43
+                                            color: backend.recording ? "#EE7045" : backend.voiceSpeaking ? "#39B976" : backend.listening ? "#725CFF" : backend.busy ? "#704CF1" : "#5940CB"
+                                        }
+                                        GradientStop {
+                                            position: 1.0
+                                            color: backend.recording ? "#5B1D1A" : backend.voiceSpeaking ? "#123E31" : backend.listening ? "#24165B" : "#211643"
+                                        }
+                                    }
+                                    scale: 1 + orbStage.voiceLevel * 0.095 * root.animationStrength
+                                    Behavior on scale { NumberAnimation { duration: 105; easing.type: Easing.OutCubic } }
+
+                                    Rectangle {
+                                        width: 92; height: 52; radius: 26
+                                        x: 20; y: 13
+                                        rotation: -16
+                                        color: "#FFFFFF"
+                                        opacity: 0.075
+                                    }
+
+                                    Rectangle {
+                                        anchors.centerIn: parent
+                                        width: 126; height: 126; radius: 63
+                                        color: "transparent"
+                                        border.width: 1
+                                        border.color: "#28FFFFFF"
+                                    }
+
+                                    Repeater {
+                                        model: 9
+                                        Rectangle {
+                                            required property int index
+                                            property real shapeFactor: 0.48 + ((index * 7) % 6) * 0.095
+                                            property real activeLevel: backend.listening ? Math.max(orbStage.voiceLevel, 0.14) : backend.voiceSpeaking ? 0.22 : 0.06
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 3.5
+                                            radius: 2
+                                            height: 7 + activeLevel * (22 + shapeFactor * 30) * root.animationStrength
+                                            x: orb.width / 2 - width / 2 + (index - 4) * 11
+                                            color: "white"
+                                            opacity: backend.listening || backend.voiceSpeaking ? 0.92 : 0.64
+                                            Behavior on height { NumberAnimation { duration: 95; easing.type: Easing.OutCubic } }
+
+                                            SequentialAnimation on scale {
+                                                running: root.motionEnabled && backend.listening && root.microphoneVisualLevel < 0.04
+                                                loops: Animation.Infinite
+                                                PauseAnimation { duration: index * 34 }
+                                                NumberAnimation { to: 1.35; duration: 170; easing.type: Easing.InOutSine }
+                                                NumberAnimation { to: 0.72; duration: 210; easing.type: Easing.InOutSine }
+                                                NumberAnimation { to: 1.0; duration: 180; easing.type: Easing.InOutSine }
                                             }
                                         }
                                     }
                                 }
-                            }
 
+                                Rectangle {
+                                    id: flashOverlay
+                                    anchors.centerIn: parent
+                                    width: 164; height: 164; radius: 82
+                                    color: orbStage.eventColor
+                                    opacity: 0
+                                }
+
+                                ParallelAnimation {
+                                    id: wakeAnimation
+                                    SequentialAnimation {
+                                        NumberAnimation { target: orbStage; property: "eventScale"; to: 0.95; duration: 90; easing.type: Easing.OutCubic }
+                                        NumberAnimation { target: orbStage; property: "eventScale"; to: 1.045; duration: 145; easing.type: Easing.OutBack }
+                                        NumberAnimation { target: orbStage; property: "eventScale"; to: 1.0; duration: 180; easing.type: Easing.OutCubic }
+                                    }
+                                    SequentialAnimation {
+                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0.92; duration: 80 }
+                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0; duration: 360 }
+                                    }
+                                    NumberAnimation { target: eventRing; property: "scale"; to: 1.34; duration: 440; easing.type: Easing.OutCubic }
+                                }
+
+                                ParallelAnimation {
+                                    id: successAnimation
+                                    SequentialAnimation {
+                                        NumberAnimation { target: flashOverlay; property: "opacity"; to: 0.22; duration: 90 }
+                                        NumberAnimation { target: flashOverlay; property: "opacity"; to: 0; duration: 420 }
+                                    }
+                                    SequentialAnimation {
+                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0.9; duration: 80 }
+                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0; duration: 480 }
+                                    }
+                                    NumberAnimation { target: eventRing; property: "scale"; to: 1.45; duration: 560; easing.type: Easing.OutCubic }
+                                }
+
+                                ParallelAnimation {
+                                    id: stepAnimation
+                                    SequentialAnimation {
+                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0.58; duration: 55 }
+                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0; duration: 230 }
+                                    }
+                                    NumberAnimation { target: eventRing; property: "scale"; to: 1.18; duration: 285; easing.type: Easing.OutCubic }
+                                }
+
+                                SequentialAnimation {
+                                    id: reducedEventAnimation
+                                    NumberAnimation { target: flashOverlay; property: "opacity"; to: 0.17; duration: 70 }
+                                    NumberAnimation { target: flashOverlay; property: "opacity"; to: 0; duration: 250 }
+                                }
+
+                                ParallelAnimation {
+                                    id: errorAnimation
+                                    SequentialAnimation {
+                                        NumberAnimation { target: orbShake; property: "x"; to: -6; duration: 55 }
+                                        NumberAnimation { target: orbShake; property: "x"; to: 6; duration: 80 }
+                                        NumberAnimation { target: orbShake; property: "x"; to: -4; duration: 70 }
+                                        NumberAnimation { target: orbShake; property: "x"; to: 0; duration: 80 }
+                                    }
+                                    SequentialAnimation {
+                                        NumberAnimation { target: flashOverlay; property: "opacity"; to: 0.19; duration: 70 }
+                                        NumberAnimation { target: flashOverlay; property: "opacity"; to: 0; duration: 330 }
+                                    }
+                                    SequentialAnimation {
+                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0.82; duration: 70 }
+                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0; duration: 330 }
+                                    }
+                                    NumberAnimation { target: eventRing; property: "scale"; to: 1.25; duration: 400; easing.type: Easing.OutCubic }
+                                }
+
+                                Connections {
+                                    target: backend
+                                    function onOrbVisualEvent(eventName) {
+                                        orbStage.playEvent(eventName)
+                                    }
+                                }
+                            }
                             Text {
                                 Layout.alignment: Qt.AlignHCenter
-                                text: backend.listening ? "Говорите…" : backend.busy ? "Выполняю…" : backend.status
+                                text: root.orbRecognizing ? "Распознаю…" : backend.listening ? "Говорите…" : backend.busy ? "Выполняю…" : backend.status
                                 color: root.textMain
                                 font.pixelSize: 17
                                 font.weight: Font.DemiBold
@@ -1455,6 +1661,55 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 Text { Layout.fillWidth: true; text: "Голосовые ответы"; color: root.textMain; font.pixelSize: 13 }
                                 AuraSwitch { checked: backend.voiceFeedbackEnabled; onToggled: backend.setVoiceFeedbackEnabled(checked) }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 190
+                        radius: 18
+                        color: "#151A25"
+                        border.color: root.line
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 17
+                            spacing: 10
+                            Text { text: "Анимация сферы"; color: root.textMain; font.pixelSize: 15; font.weight: Font.DemiBold }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text { text: "Интенсивность"; color: root.textMain; font.pixelSize: 13 }
+                                Item { Layout.fillWidth: true }
+                                ComboBox {
+                                    id: animationIntensityCombo
+                                    Layout.preferredWidth: 190
+                                    Layout.preferredHeight: 40
+                                    model: ["Низкая", "Обычная", "Высокая"]
+                                    currentIndex: backend.animationIntensity === "low" ? 0 : backend.animationIntensity === "high" ? 2 : 1
+                                    onActivated: backend.setAnimationIntensity(currentIndex === 0 ? "low" : currentIndex === 2 ? "high" : "normal")
+                                    contentItem: Text { leftPadding: 12; text: animationIntensityCombo.displayText; color: root.textMain; verticalAlignment: Text.AlignVCenter; font.pixelSize: 12 }
+                                    background: Rectangle { radius: 12; color: "#0D111A"; border.color: root.line }
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+                                    Text { text: "Реакция на микрофон"; color: root.textMain; font.pixelSize: 13 }
+                                    Text { text: "Кольцо и волна реагируют на громкость речи"; color: root.textMuted; font.pixelSize: 10 }
+                                }
+                                AuraSwitch { checked: backend.microphoneReactiveAnimation; onToggled: backend.setMicrophoneReactiveAnimation(checked) }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+                                    Text { text: "Уменьшить движение"; color: root.textMain; font.pixelSize: 13 }
+                                    Text { text: "Отключает вращение, дыхание и покачивание"; color: root.textMuted; font.pixelSize: 10 }
+                                }
+                                AuraSwitch { checked: backend.reduceMotion; onToggled: backend.setReduceMotion(checked) }
                             }
                         }
                     }

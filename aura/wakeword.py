@@ -47,6 +47,7 @@ class WakeWordWorker(QObject):
     activated = Signal(str)
     commandCaptured = Signal(object)
     commandFailed = Signal(str)
+    levelChanged = Signal(int)
     failed = Signal(str)
     finished = Signal()
 
@@ -64,6 +65,15 @@ class WakeWordWorker(QObject):
         self.sample_rate = sample_rate
         self.blocksize = 1280  # 80 ms at 16 kHz, responsive without overloading Vosk.
         self._stop_event = threading.Event()
+        self._last_level = -1
+
+    def _emit_level(self, rms: float) -> None:
+        # Speech RMS on common Windows microphones is usually within 0..3500.
+        # The exponent keeps quiet speech visible without making loud sounds jump.
+        normalized = 0 if rms <= 70 else int(min(100.0, ((rms - 70.0) / 2800.0) ** 0.62 * 100.0))
+        if abs(normalized - self._last_level) >= 2:
+            self._last_level = normalized
+            self.levelChanged.emit(normalized)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -132,6 +142,7 @@ class WakeWordWorker(QObject):
 
                     pre_roll.append(data)
                     level = pcm_rms(data)
+                    self._emit_level(level)
                     if level > 0:
                         noise_samples.append(level)
 
@@ -156,6 +167,7 @@ class WakeWordWorker(QObject):
             if not self._stop_event.is_set():
                 self.failed.emit(f"Голосовая активация недоступна: {exc}")
         finally:
+            self.levelChanged.emit(0)
             if not self._stop_event.is_set():
                 if command_payload is not None:
                     self.commandCaptured.emit(command_payload)
@@ -197,6 +209,7 @@ class WakeWordWorker(QObject):
 
             chunks.append(data)
             level = pcm_rms(data)
+            self._emit_level(level)
 
             # Ignore the tail of the wake word itself, then react to the command.
             if elapsed < 0.28:

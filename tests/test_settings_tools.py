@@ -57,6 +57,24 @@ class SettingsAndToolsTests(unittest.TestCase):
         self.assertEqual(devices[0]["index"], -1)
         self.assertTrue(devices[0]["default"])
 
+    def test_invalid_animation_intensity_falls_back_to_normal(self) -> None:
+        settings = AssistantSettings.from_dict({"animation_intensity": "extreme"})
+        self.assertEqual(settings.animation_intensity, "normal")
+
+    def test_animation_preferences_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            store = SettingsStore(Path(folder))
+            settings = AssistantSettings(
+                animation_intensity="high",
+                microphone_reactive_animation=False,
+                reduce_motion=True,
+            )
+            store.save(settings)
+            loaded = store.load()
+            self.assertEqual(loaded.animation_intensity, "high")
+            self.assertFalse(loaded.microphone_reactive_animation)
+            self.assertTrue(loaded.reduce_motion)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,6 +15,9 @@ class AssistantSettings:
     first_run_completed: bool = False
     autostart_enabled: bool = False
     update_channel: str = "stable"
+    animation_intensity: str = "normal"
+    microphone_reactive_animation: bool = True
+    reduce_motion: bool = False
 
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> "AssistantSettings":
@@ -27,6 +30,9 @@ class AssistantSettings:
         channel = str(payload.get("update_channel") or "stable").strip().lower()
         if channel not in {"stable", "beta"}:
             channel = "stable"
+        animation_intensity = str(payload.get("animation_intensity") or "normal").strip().lower()
+        if animation_intensity not in {"low", "normal", "high"}:
+            animation_intensity = "normal"
         return cls(
             wake_enabled=bool(payload.get("wake_enabled", True)),
             wake_phrase=phrase,
@@ -35,6 +41,9 @@ class AssistantSettings:
             first_run_completed=bool(payload.get("first_run_completed", True)),
             autostart_enabled=bool(payload.get("autostart_enabled", False)),
             update_channel=channel,
+            animation_intensity=animation_intensity,
+            microphone_reactive_animation=bool(payload.get("microphone_reactive_animation", True)),
+            reduce_motion=bool(payload.get("reduce_motion", False)),
         )
 
 

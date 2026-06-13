@@ -348,6 +348,8 @@ class AssistantBackend(QObject):
     settingsChanged = Signal()
     microphoneStateChanged = Signal()
     diagnosticsChanged = Signal()
+    audioLevelChanged = Signal()
+    orbVisualEvent = Signal(str)
 
     def __init__(
         self,
@@ -380,6 +382,7 @@ class AssistantBackend(QObject):
         self._microphone_testing = False
         self._microphone_level = 0
         self._microphone_test_message = ""
+        self._audio_level = 0
         self._microphone_test_thread: QThread | None = None
         self._microphone_test_worker: MicrophoneTestWorker | None = None
         self._pending_microphone_test = False
@@ -575,6 +578,22 @@ class AssistantBackend(QObject):
     def microphoneTestMessage(self) -> str:
         return self._microphone_test_message
 
+    @Property(int, notify=audioLevelChanged)
+    def audioLevel(self) -> int:
+        return self._audio_level
+
+    @Property(str, notify=settingsChanged)
+    def animationIntensity(self) -> str:
+        return self._settings.animation_intensity
+
+    @Property(bool, notify=settingsChanged)
+    def microphoneReactiveAnimation(self) -> bool:
+        return bool(self._settings.microphone_reactive_animation)
+
+    @Property(bool, notify=settingsChanged)
+    def reduceMotion(self) -> bool:
+        return bool(self._settings.reduce_motion)
+
     @Property(str, notify=settingsChanged)
     def updateChannel(self) -> str:
         return self._settings.update_channel
@@ -658,6 +677,7 @@ class AssistantBackend(QObject):
         worker.activated.connect(self._on_wake_activated)
         worker.commandCaptured.connect(self._on_wake_command_captured)
         worker.commandFailed.connect(self._on_wake_command_error)
+        worker.levelChanged.connect(self._on_audio_level)
         worker.failed.connect(self._on_wake_error)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
@@ -705,6 +725,37 @@ class AssistantBackend(QObject):
         else:
             self._stop_wake_listener()
             self._set_status("Голосовая активация выключена")
+
+    @Slot(str)
+    def setAnimationIntensity(self, value: str) -> None:
+        value = str(value or "normal").strip().lower()
+        if value not in {"low", "normal", "high"}:
+            value = "normal"
+        if self._settings.animation_intensity == value:
+            return
+        self._settings.animation_intensity = value
+        self._save_settings()
+        self.settingsChanged.emit()
+
+    @Slot(bool)
+    def setMicrophoneReactiveAnimation(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if self._settings.microphone_reactive_animation == enabled:
+            return
+        self._settings.microphone_reactive_animation = enabled
+        if not enabled:
+            self._set_audio_level(0)
+        self._save_settings()
+        self.settingsChanged.emit()
+
+    @Slot(bool)
+    def setReduceMotion(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if self._settings.reduce_motion == enabled:
+            return
+        self._settings.reduce_motion = enabled
+        self._save_settings()
+        self.settingsChanged.emit()
 
     @Slot()
     def refreshMicrophones(self) -> None:
@@ -1281,6 +1332,7 @@ class AssistantBackend(QObject):
     def _handle_transcript(self, text: str) -> None:
         match = self.matcher.find(text, self.store.all())
         if not match:
+            self.orbVisualEvent.emit("error")
             self._set_status("Команда не найдена")
             self._add_history(text, "Не найдено")
             self._speak("not_found", lambda: QTimer.singleShot(150, self.startWakeListening))
@@ -1326,12 +1378,14 @@ class AssistantBackend(QObject):
 
     @Slot(int, int, str)
     def _on_execution_progress(self, current: int, total: int, text: str) -> None:
+        self.orbVisualEvent.emit("step")
         self._set_status(f"{current}/{total}  {text}")
 
     @Slot(str)
     def _on_execution_finished(self, message: str) -> None:
         command = self._active_command
         self._execution_feedback_key = "done"
+        self.orbVisualEvent.emit("success")
         self._set_status(message)
         self._add_history(self._transcript or (command.name if command else "Команда"), command.name if command else "Выполнено")
 
@@ -1339,6 +1393,7 @@ class AssistantBackend(QObject):
     def _on_execution_failed(self, message: str) -> None:
         command = self._active_command
         self._execution_feedback_key = "failed"
+        self.orbVisualEvent.emit("error")
         self._set_status(message)
         self._add_history(self._transcript or (command.name if command else "Команда"), f"Ошибка: {message}")
 
@@ -1401,6 +1456,7 @@ class AssistantBackend(QObject):
 
     @Slot()
     def _speech_finished(self) -> None:
+        self._set_audio_level(0)
         self._set_listening(False)
         self._speech_thread = None
         self._speech_worker = None
@@ -1435,6 +1491,7 @@ class AssistantBackend(QObject):
         # The same microphone stream now continues capturing the command.
         # No Windows notification sound is played, so it cannot leak into audio.
         self._set_listening(True)
+        self.orbVisualEvent.emit("wake")
         self._set_status("Слушаю команду…")
 
     @Slot(object)
@@ -1447,6 +1504,7 @@ class AssistantBackend(QObject):
     def _on_wake_command_error(self, message: str) -> None:
         self._pending_captured_audio = None
         self._set_listening(False)
+        self.orbVisualEvent.emit("error")
         self._set_status(message)
         self._add_history("Голосовая активация", message)
 
@@ -1463,6 +1521,7 @@ class AssistantBackend(QObject):
 
     @Slot()
     def _wake_thread_cleanup(self) -> None:
+        self._set_audio_level(0)
         self._wake_thread = None
         self._wake_worker = None
         self._set_wake_listening(False)
@@ -1650,6 +1709,21 @@ class AssistantBackend(QObject):
             self._settings_store.save(self._settings)
         except OSError:
             logging.exception("Unable to save settings")
+
+    @Slot(int)
+    def _on_audio_level(self, value: int) -> None:
+        if not self._settings.microphone_reactive_animation:
+            return
+        self._set_audio_level(value)
+
+    def _set_audio_level(self, value: int) -> None:
+        value = max(0, min(100, int(value)))
+        # Smooth native microphone data so the orb feels fluid instead of jittery.
+        smoothed = value if value == 0 else round(self._audio_level * 0.58 + value * 0.42)
+        if abs(smoothed - self._audio_level) < 2 and smoothed not in {0, 100}:
+            return
+        self._audio_level = smoothed
+        self.audioLevelChanged.emit()
 
     def _set_status(self, value: str) -> None:
         self._status = value

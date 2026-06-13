@@ -64,6 +64,21 @@ class InterfaceSourceTests(unittest.TestCase):
         self.assertNotIn('_speak("not_found"', speech_error)
 
 
+    def test_reactive_orb_and_visual_events_are_connected(self) -> None:
+        self.assertIn('id: orbStage', QML)
+        self.assertIn('function onOrbVisualEvent(eventName)', QML)
+        self.assertIn('backend.audioLevel', QML)
+        self.assertIn('orbVisualEvent = Signal(str)', BACKEND)
+        self.assertIn('worker.levelChanged.connect(self._on_audio_level)', BACKEND)
+
+    def test_animation_settings_are_exposed(self) -> None:
+        self.assertIn('Анимация сферы', QML)
+        self.assertIn('backend.setAnimationIntensity', QML)
+        self.assertIn('backend.setMicrophoneReactiveAnimation', QML)
+        self.assertIn('backend.setReduceMotion', QML)
+        self.assertIn('def animationIntensity', BACKEND)
+        self.assertIn('def reduceMotion', BACKEND)
+
 
 if __name__ == "__main__":
     unittest.main()
