@@ -1,0 +1,68 @@
+name: Build and publish AURA
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set version from tag
+        shell: pwsh
+        run: python tools/set_version.py "${{ github.ref_name }}"
+
+      - name: Configure update repository
+        shell: pwsh
+        run: python tools/configure_updates.py --repository "${{ github.repository }}"
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-core.txt pyinstaller
+
+      - name: Build AURA and updater
+        shell: cmd
+        run: BUILD_PORTABLE.cmd
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION.txt).Trim()
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$version" "installer\AURA.iss"
+          python tools/make_checksum.py "dist\installer\AURA-Setup-$version.exe"
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content VERSION.txt).Trim()
+          $installer = "dist\installer\AURA-Setup-$version.exe"
+          $checksum = "$installer.sha256"
+
+          gh release view "v$version" *> $null
+
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload "v$version" $installer $checksum --clobber
+          } else {
+            gh release create "v$version" $installer $checksum --title "AURA $version" --generate-notes
+          }
