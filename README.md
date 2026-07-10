@@ -1,38 +1,39 @@
-# AURA 0.9.1
+# AURA 0.10.0
 
-AURA is a Windows voice assistant and visual automation tool. It can launch programs, open sites, manage windows, reproduce keyboard and mouse actions, run multi-step modes, and update itself through GitHub Releases.
+AURA is a Windows voice assistant and visual automation tool. It launches programs, opens sites and files, controls windows, reproduces keyboard and mouse actions, runs multi-step modes, schedules automations and updates itself through GitHub Releases.
 
-## What changed in 0.9.1
+## What changed in 0.10.0
 
-This release focuses on making AURA easy to use for people who do not want to learn automation concepts.
+This release rebuilds the daily interface around simple, separate pages instead of one overloaded screen.
 
-- New commands now open in a guided three-step builder.
-- The builder asks what AURA should do, asks for one value, then suggests a name and voice phrase.
-- Programs, files and folders can be selected through standard Windows dialogs.
-- The six most common actions are presented as large, clear choices.
-- Action recording is available directly from the easy builder.
-- The complete editor remains available for multi-step scenarios.
-- Scheduling, modes, retries and error behavior stay hidden until requested.
-- The scenario test button is now called Trial run.
+- Added a clear five-section navigation: Home, Commands, Automations, History and Settings.
+- Rebuilt the Home page around one primary action: speak to AURA or create a command.
+- Added a dedicated Commands page with human-readable cards, search, run and edit actions.
+- Added a dedicated Automations page for modes, startup scenarios and schedules.
+- Added a full History page with persistent results and errors.
+- Added a simple Settings page with wake phrase, voice feedback, microphone testing, updates and autostart.
+- Kept the complete settings center available through the All settings button.
+- Added a compact always-on-top assistant panel that appears when the main window is hidden and AURA is listening or executing.
+- Split the interface into reusable QML components and page files.
+- Preserved the guided command builder, advanced editor, action library, command palette, updater and existing user data.
 
-## Quality foundation from 0.9.0
+## Interface structure
 
-This release keeps the product-quality improvements introduced in 0.9.0.
+```text
+ui/
+    Main.qml
+    components/
+        NavigationButton.qml
+        SectionCard.qml
+    pages/
+        HomePage.qml
+        CommandsPage.qml
+        AutomationsPage.qml
+        HistoryPage.qml
+        SettingsPage.qml
+```
 
-- Added a searchable command palette opened with `Ctrl + K`.
-- Added a searchable action library grouped by purpose.
-- Added live validation in the command editor.
-- Invalid commands can no longer be saved silently.
-- Added command context menus with run, duplicate, export, enable and delete actions.
-- Added import and export for one command or the complete command collection.
-- Added persistent activity history in `%APPDATA%\AURA\history.json`.
-- Added non-destructive toast notifications for common operations.
-- Added retry count and continue-on-error settings for every step.
-- Added new safe actions: web search, create folder, and copy text.
-- Added single-instance protection. Reopening AURA activates the existing window.
-- Added window size and position restoration.
-- Imported shell commands are forced to require confirmation.
-- Refined editor spacing, disabled states, validation feedback and action selection.
+The main window now coordinates navigation and shared dialogs. Individual pages own their layout and emit simple signals back to `Main.qml`. This makes future visual changes much safer than editing one very large screen.
 
 ## Run from source
 
@@ -50,23 +51,17 @@ The first start creates an isolated `.venv` and installs the required components
 - Emergency scenario stop: `Ctrl + Shift + F12`.
 - Command palette: `Ctrl + K`.
 - New command: `Ctrl + N`.
-- Settings: `Ctrl + ,`.
+- Settings page: `Ctrl + ,`.
 
-## Command editor
+## Creating commands
 
-Commands and computer modes are built from visible steps. Each step can be enabled or disabled, tested separately, retried, delayed, and configured to continue after an error.
+The default builder uses three simple steps:
 
-The editor validates names, voice phrases, schedules, URLs, time ranges, pauses and action values before saving. Dangerous shell steps always require explicit confirmation.
+1. Choose what AURA should do.
+2. Select a program, site, file, folder or action value.
+3. Confirm the suggested name and voice phrase.
 
-## Automation
-
-A scenario can start:
-
-- from a voice phrase;
-- when AURA starts;
-- every day at a specified time.
-
-Supported variables include `${user}`, `${desktop}`, `${downloads}`, `${last_download}`, `${active_window}`, `${date}`, `${time}` and `${clipboard}`.
+The full editor remains available for multi-step scenarios, schedules, conditions, retries and error handling.
 
 ## User data
 
@@ -76,11 +71,11 @@ Commands, settings, history, backups and logs are stored outside the installatio
 %APPDATA%\AURA
 ```
 
-This keeps user data intact when AURA is updated or reinstalled.
+Existing data from earlier versions is preserved.
 
 ## Updates
 
-AURA checks GitHub Releases shortly after startup and every 15 minutes. It downloads the installer and checksum, verifies SHA-256, and then asks for confirmation before installing.
+AURA checks GitHub Releases shortly after startup and every 15 minutes. It downloads the installer and checksum, verifies SHA-256, then asks before installing.
 
 Configure a source checkout with:
 
@@ -94,7 +89,7 @@ For release setup, see `AUTO_UPDATE_SETUP.md`.
 
 - `BUILD_PORTABLE.cmd` builds AURA and AURAUpdater.
 - `BUILD_INSTALLER.cmd` builds the Inno Setup installer.
-- Publishing a tag such as `v0.9.0` starts `.github/workflows/release.yml`.
+- Publishing a tag such as `v0.10.0` starts `.github/workflows/release.yml`.
 
 ## Voice assets
 

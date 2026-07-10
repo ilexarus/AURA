@@ -5,13 +5,15 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-QML = (ROOT / "ui" / "Main.qml").read_text(encoding="utf-8")
+QML_FILES = sorted((ROOT / "ui").rglob("*.qml"))
+QML = "\n".join(path.read_text(encoding="utf-8") for path in QML_FILES)
+MAIN_QML = (ROOT / "ui" / "Main.qml").read_text(encoding="utf-8")
 BACKEND = (ROOT / "aura" / "backend.py").read_text(encoding="utf-8")
 
 
 class InterfaceSourceTests(unittest.TestCase):
     def test_command_search_is_present(self) -> None:
-        self.assertIn("Поиск команд", QML)
+        self.assertIn("Поиск по названию или голосовой фразе", QML)
         self.assertIn("commandSearch", QML)
 
     def test_step_and_scenario_testing_are_connected(self) -> None:
@@ -94,13 +96,13 @@ class InterfaceSourceTests(unittest.TestCase):
         self.assertIn('require_window', catalog)
         self.assertIn('require_time', catalog)
 
-    def test_sidebar_is_compact_without_type_or_trigger_labels(self) -> None:
-        sidebar = QML.split('id: commandColumn', 1)[1].split('SoftButton {', 1)[0]
-        self.assertNotIn('text: "Тип: " + modelData.type_label', sidebar)
-        self.assertNotIn('text: "Запуск: " + modelData.trigger_label', sidebar)
-        self.assertIn('text: modelData.preview', sidebar)
-        self.assertNotIn('id: favoriteButton', sidebar)
-        self.assertNotIn('id: runSidebarButton', sidebar)
+    def test_command_list_is_human_readable_without_technical_labels(self) -> None:
+        commands_page = (ROOT / "ui" / "pages" / "CommandsPage.qml").read_text(encoding="utf-8")
+        self.assertNotIn('text: "Тип: " + modelData.type_label', commands_page)
+        self.assertNotIn('text: "Запуск: " + modelData.trigger_label', commands_page)
+        self.assertIn('text: modelData.preview', commands_page)
+        self.assertIn('text: modelData.phrases_text', commands_page)
+        self.assertNotIn('id: favoriteButton', commands_page)
 
     def test_favorites_feature_is_removed(self) -> None:
         self.assertNotIn('text: "Избранное"', QML)
@@ -128,8 +130,8 @@ class InterfaceSourceTests(unittest.TestCase):
         self.assertIn('id: commandPalette', QML)
         self.assertIn('id: actionPicker', QML)
         self.assertIn('backend.validateDraft', QML)
-        self.assertIn('backend.duplicateCommand', QML)
-        self.assertIn('backend.exportCommand', QML)
+        self.assertIn('duplicateCommand', QML)
+        self.assertIn('exportCommand', QML)
         self.assertIn('function onToastRequested', QML)
 
 
@@ -159,6 +161,30 @@ class InterfaceSourceTests(unittest.TestCase):
         self.assertIn('"retry_count": Number(item.retry_count || 0)', QML)
         self.assertIn('"continue_on_error": Boolean(item.continue_on_error)', QML)
         self.assertIn('Продолжить при ошибке', QML)
+
+    def test_page_based_navigation_is_present(self) -> None:
+        self.assertIn('property int currentPage', MAIN_QML)
+        self.assertIn('StackLayout', MAIN_QML)
+        self.assertIn('HomePage {', MAIN_QML)
+        self.assertIn('CommandsPage {', MAIN_QML)
+        self.assertIn('AutomationsPage {', MAIN_QML)
+        self.assertIn('HistoryPage {', MAIN_QML)
+        self.assertIn('SettingsPage {', MAIN_QML)
+        self.assertIn('text: "Главная"', MAIN_QML)
+        self.assertIn('text: "Команды"', MAIN_QML)
+
+    def test_compact_assistant_hud_is_present(self) -> None:
+        self.assertIn('id: compactAssistant', MAIN_QML)
+        self.assertIn('Qt.WindowStaysOnTopHint', MAIN_QML)
+        self.assertIn('!root.visible', MAIN_QML)
+
+    def test_simple_settings_page_is_present(self) -> None:
+        settings_page = (ROOT / "ui" / "pages" / "SettingsPage.qml").read_text(encoding="utf-8")
+        self.assertIn('Голосовая активация', settings_page)
+        self.assertIn('Голосовые ответы', settings_page)
+        self.assertIn('Проверить обновления', settings_page)
+        self.assertIn('Все настройки', settings_page)
+
 
 
 if __name__ == "__main__":

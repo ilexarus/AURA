@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.0
+
+- Rebuilt the main interface around five dedicated pages.
+- Added Home, Commands, Automations, History and Settings navigation.
+- Added a simplified Home page focused on voice use and command creation.
+- Added a searchable command-management page with human-readable cards.
+- Added a dedicated page for modes, startup scenarios and scheduled automations.
+- Added a full persistent history page.
+- Added a simple settings page for the most common controls.
+- Added a compact always-on-top assistant panel for minimized use.
+- Split the QML interface into reusable components and pages.
+- Preserved the easy builder, advanced editor, command palette and old user data.
+
 ## 0.9.1
 
 - Added a guided three-step command builder as the default creation flow.

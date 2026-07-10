@@ -2,6 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
+import "components"
+import "pages"
 
 ApplicationWindow {
     id: root
@@ -39,6 +41,9 @@ ApplicationWindow {
     property real animationStrength: backend.animationIntensity === "low" ? 0.58 : backend.animationIntensity === "high" ? 1.28 : 1.0
     property real microphoneVisualLevel: backend.microphoneReactiveAnimation ? backend.audioLevel / 100.0 : 0.0
     property bool motionEnabled: !backend.reduceMotion
+    property int currentPage: 0
+    readonly property var pageTitles: ["Главная", "Команды", "Автоматизации", "История", "Настройки"]
+    readonly property var pageSubtitles: ["Голосовое управление без лишних действий", "Создание и управление голосовыми командами", "Режимы, расписания и фоновые сценарии", "Результаты выполненных команд", "Основные параметры AURA"]
 
     function createCommand() {
         root.editingCommand = null
@@ -51,6 +56,11 @@ ApplicationWindow {
     }
 
     function openSettings() {
+        root.currentPage = 4
+        backend.refreshMicrophones()
+    }
+
+    function openAdvancedSettings() {
         backend.refreshMicrophones()
         settingsDialog.open()
     }
@@ -206,7 +216,7 @@ ApplicationWindow {
         gradient: Gradient {
             orientation: Gradient.Horizontal
             GradientStop { position: 0.0; color: "#090C12" }
-            GradientStop { position: 0.65; color: "#0B0E16" }
+            GradientStop { position: 0.72; color: "#0B0E16" }
             GradientStop { position: 1.0; color: "#10101B" }
         }
     }
@@ -216,151 +226,97 @@ ApplicationWindow {
         spacing: 0
 
         Rectangle {
-            Layout.preferredWidth: 238
+            Layout.preferredWidth: 216
             Layout.fillHeight: true
             color: "#0C1018"
             border.color: "#181E2A"
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 22
-                anchors.rightMargin: 22
+                anchors.leftMargin: 16
+                anchors.rightMargin: 16
                 anchors.topMargin: 18
-                anchors.bottomMargin: 22
-                spacing: 14
+                anchors.bottomMargin: 18
+                spacing: 8
 
                 RowLayout {
                     Layout.fillWidth: true
-                    Text {
+                    Layout.leftMargin: 4
+                    Layout.rightMargin: 4
+                    Layout.bottomMargin: 14
+                    spacing: 10
+                    Rectangle {
+                        width: 38; height: 38; radius: 13
+                        gradient: Gradient {
+                            GradientStop { position: 0; color: "#9A83FF" }
+                            GradientStop { position: 1; color: "#6041D8" }
+                        }
+                        Text { anchors.centerIn: parent; text: "A"; color: "white"; font.pixelSize: 17; font.weight: Font.Bold }
+                    }
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        text: "МОИ КОМАНДЫ"
-                        color: "#626C7E"
-                        font.pixelSize: 10
-                        font.bold: true
-                        font.letterSpacing: 1.2
-                        topPadding: 8
-                    }
-                    Text {
-                        text: backend.commands.length
-                        color: root.textMuted
-                        font.pixelSize: 10
+                        spacing: 1
+                        Text { text: "AURA"; color: root.textMain; font.pixelSize: 17; font.weight: Font.Bold; font.letterSpacing: 1.0 }
+                        Text { text: "ГОЛОСОВОЙ АССИСТЕНТ"; color: "#626C7E"; font.pixelSize: 7; font.bold: true; font.letterSpacing: 0.8 }
                     }
                 }
 
-                AppTextField {
-                    id: commandSearchField
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 38
-                    placeholderText: "Поиск команд"
-                    onTextChanged: root.commandSearch = text.trim().toLowerCase()
+                Text {
+                    text: "РАЗДЕЛЫ"
+                    color: "#596375"
+                    font.pixelSize: 9
+                    font.bold: true
+                    font.letterSpacing: 1.2
+                    Layout.leftMargin: 12
+                    Layout.topMargin: 4
+                    Layout.bottomMargin: 4
                 }
 
-                Flickable {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    contentHeight: commandColumn.height
+                NavigationButton { Layout.fillWidth: true; iconText: "⌂"; text: "Главная"; selected: root.currentPage === 0; onClicked: root.currentPage = 0 }
+                NavigationButton { Layout.fillWidth: true; iconText: "▤"; text: "Команды"; selected: root.currentPage === 1; onClicked: root.currentPage = 1 }
+                NavigationButton { Layout.fillWidth: true; iconText: "◇"; text: "Автоматизации"; selected: root.currentPage === 2; onClicked: root.currentPage = 2 }
+                NavigationButton { Layout.fillWidth: true; iconText: "◷"; text: "История"; selected: root.currentPage === 3; onClicked: root.currentPage = 3 }
+                NavigationButton { Layout.fillWidth: true; iconText: "⚙"; text: "Настройки"; selected: root.currentPage === 4; onClicked: root.openSettings() }
 
-                    Column {
-                        id: commandColumn
-                        width: parent.width
-                        spacing: 7
-                        Repeater {
-                            model: backend.commands
-                            delegate: Rectangle {
-                                required property var modelData
-                                property bool matchesSearch: root.commandSearch.length === 0
-                                    || String(modelData.name).toLowerCase().indexOf(root.commandSearch) >= 0
-                                    || String(modelData.phrases_text).toLowerCase().indexOf(root.commandSearch) >= 0
-                                    || String(modelData.preview).toLowerCase().indexOf(root.commandSearch) >= 0
-                                    || String(modelData.type_label).toLowerCase().indexOf(root.commandSearch) >= 0
-                                    || String(modelData.trigger_label).toLowerCase().indexOf(root.commandSearch) >= 0
-                                width: commandColumn.width
-                                height: matchesSearch ? 54 : 0
-                                visible: matchesSearch
-                                radius: 12
-                                color: commandMouse.containsMouse ? "#171D29" : "transparent"
-                                opacity: modelData.enabled ? 1 : 0.45
-                                Behavior on color { ColorAnimation { duration: 120 } }
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 11
-                                    anchors.rightMargin: 11
-                                    spacing: 9
-                                    Rectangle {
-                                        width: 7; height: 7; radius: 4
-                                        color: modelData.enabled ? root.accent : "#4F5867"
-                                    }
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 2
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: modelData.name
-                                            color: root.textMain
-                                            font.pixelSize: 13
-                                            font.weight: Font.DemiBold
-                                            elide: Text.ElideRight
-                                        }
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: modelData.preview
-                                            visible: String(modelData.preview || "").length > 0
-                                            color: root.textMuted
-                                            font.pixelSize: 9
-                                            elide: Text.ElideRight
-                                        }
-                                    }
-                                }
-                                Menu {
-                                    id: commandContextMenu
-                                    MenuItem { text: "Открыть"; onTriggered: { root.editingCommand = modelData; editor.open() } }
-                                    MenuItem { text: "Запустить"; enabled: modelData.enabled; onTriggered: backend.runCommandById(modelData.id) }
-                                    MenuSeparator {}
-                                    MenuItem { text: "Создать копию"; onTriggered: backend.duplicateCommand(modelData.id) }
-                                    MenuItem { text: "Экспортировать"; onTriggered: backend.exportCommand(modelData.id) }
-                                    MenuItem { text: modelData.enabled ? "Отключить" : "Включить"; onTriggered: backend.setCommandEnabled(modelData.id, !modelData.enabled) }
-                                    MenuSeparator {}
-                                    MenuItem { text: "Удалить"; onTriggered: backend.deleteCommand(modelData.id) }
-                                }
-                                MouseArea {
-                                    id: commandMouse
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: function(mouse) {
-                                        if (mouse.button === Qt.RightButton) {
-                                            commandContextMenu.popup()
-                                        } else {
-                                            root.editingCommand = modelData
-                                            editor.open()
-                                        }
-                                    }
-                                }
-                            }
+                Item { Layout.fillHeight: true }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 76
+                    radius: 15
+                    color: "#121722"
+                    border.color: root.line
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 5
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            Rectangle { width: 8; height: 8; radius: 4; color: root.assistantStateColor }
+                            Text { Layout.fillWidth: true; text: root.assistantStateLabel; color: root.textMain; font.pixelSize: 10; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: backend.wakeEnabled ? "Скажите «" + backend.wakePhrase + "»" : "Горячая клавиша Ctrl + Shift + Space"
+                            color: root.textMuted
+                            font.pixelSize: 8
+                            wrapMode: Text.WordWrap
                         }
                     }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.currentPage = 4
+                    }
                 }
 
-                SoftButton {
+                RowLayout {
                     Layout.fillWidth: true
-                    text: "+  Создать команду"
-                    onClicked: root.createCommand()
+                    Layout.topMargin: 6
+                    Text { Layout.fillWidth: true; text: "AURA " + backend.version; color: "#596375"; font.pixelSize: 8 }
+                    Text { text: "Ctrl + K"; color: "#687386"; font.pixelSize: 8; font.family: "Consolas" }
                 }
-
-                SoftButton {
-                    Layout.fillWidth: true
-                    text: "◇  Шаблоны режимов"
-                    onClicked: templateDialog.open()
-                }
-
-                SoftButton {
-                    Layout.fillWidth: true
-                    text: "⚙  Настройки"
-                    onClicked: root.openSettings()
-                }
-
             }
         }
 
@@ -370,466 +326,205 @@ ApplicationWindow {
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 30
-                spacing: 20
+                anchors.leftMargin: 28
+                anchors.rightMargin: 28
+                anchors.topMargin: 22
+                anchors.bottomMargin: 24
+                spacing: 18
 
                 RowLayout {
                     Layout.fillWidth: true
-                    Column {
+                    Layout.preferredHeight: 52
+                    spacing: 14
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        Text { text: "Добрый день"; color: root.textMain; font.pixelSize: 25; font.weight: Font.DemiBold }
-                        Text { text: "Скажите команду или проверьте её текстом"; color: root.textMuted; font.pixelSize: 13; topPadding: 4 }
+                        spacing: 2
+                        Text { text: root.pageTitles[root.currentPage]; color: root.textMain; font.pixelSize: 23; font.weight: Font.DemiBold }
+                        Text { text: root.pageSubtitles[root.currentPage]; color: root.textMuted; font.pixelSize: 11 }
                     }
                     Rectangle {
                         height: 36
-                        width: wakeText.width + 24
-                        radius: 11
+                        width: wakePillText.implicitWidth + 26
+                        radius: 12
                         color: backend.wakeEnabled ? "#1E1932" : "#141925"
                         border.color: backend.wakeEnabled ? "#4A3A82" : root.line
                         Text {
-                            id: wakeText
+                            id: wakePillText
                             anchors.centerIn: parent
-                            text: "◉  «Аура»"
+                            text: backend.wakeEnabled ? "◉  «" + backend.wakePhrase + "»" : "Голос выключен"
                             color: backend.wakeEnabled ? root.accentSoft : root.textMuted
-                            font.pixelSize: 11
+                            font.pixelSize: 10
                         }
-                        ToolTip.visible: wakeMouse.containsMouse
+                        ToolTip.visible: wakePillMouse.containsMouse
                         ToolTip.text: backend.wakeEnabled ? "Выключить голосовую активацию" : "Включить голосовую активацию"
                         MouseArea {
-                            id: wakeMouse
+                            id: wakePillMouse
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: backend.setWakeEnabled(!backend.wakeEnabled)
                         }
                     }
-                    Rectangle {
-                        height: 36
-                        width: shortcutText.width + 28
-                        radius: 11
-                        color: paletteMouse.containsMouse ? "#1B2130" : "#141925"
-                        border.color: paletteMouse.containsMouse ? "#39445A" : root.line
-                        Text {
-                            id: shortcutText
-                            anchors.centerIn: parent
-                            text: "Ctrl  +  K   Быстрый запуск"
-                            color: "#AAB2C1"
-                            font.pixelSize: 11
-                            font.family: "Consolas"
-                        }
-                        MouseArea { id: paletteMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.openCommandPalette() }
+                    Button {
+                        id: paletteTopButton
+                        text: "Ctrl + K   Быстрый запуск"
+                        implicitHeight: 36
+                        leftPadding: 15
+                        rightPadding: 15
+                        onClicked: root.openCommandPalette()
+                        contentItem: Text { text: paletteTopButton.text; color: "#AAB2C1"; font.pixelSize: 10; font.family: "Consolas"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                        background: Rectangle { radius: 12; color: paletteTopButton.hovered ? "#1B2130" : "#141925"; border.color: paletteTopButton.hovered ? "#39445A" : root.line }
                     }
                 }
 
-                RowLayout {
+                StackLayout {
+                    id: pageStack
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    spacing: 20
+                    currentIndex: root.currentPage
 
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.minimumWidth: 500
-                        radius: 24
-                        color: root.panel
-                        border.color: root.line
-
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: 26
-                            spacing: 15
-
-                            Item {
-                                id: orbStage
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                Layout.minimumHeight: 300
-
-                                property real breathScale: 1.0
-                                property real eventScale: 1.0
-                                property color eventColor: root.assistantStateColor
-                                property real voiceLevel: backend.listening ? Math.max(root.microphoneVisualLevel, 0.06) : 0.0
-
-                                function prepareEvent(colorValue) {
-                                    eventColor = colorValue
-                                    eventRing.opacity = 0
-                                    eventRing.scale = 0.86
-                                    flashOverlay.opacity = 0
-                                    eventScale = 1
-                                    orbShake.x = 0
-                                }
-
-                                function playEvent(eventName) {
-                                    if (eventName === "wake") {
-                                        prepareEvent("#76C8FF")
-                                        root.motionEnabled ? wakeAnimation.restart() : reducedEventAnimation.restart()
-                                    } else if (eventName === "success") {
-                                        prepareEvent("#43D17C")
-                                        root.motionEnabled ? successAnimation.restart() : reducedEventAnimation.restart()
-                                    } else if (eventName === "error") {
-                                        prepareEvent("#FF6B72")
-                                        root.motionEnabled ? errorAnimation.restart() : reducedEventAnimation.restart()
-                                    } else if (eventName === "step") {
-                                        prepareEvent(root.accentSoft)
-                                        root.motionEnabled ? stepAnimation.restart() : reducedEventAnimation.restart()
-                                    }
-                                }
-
-                                transform: Translate { id: orbShake; x: 0 }
-                                scale: breathScale * eventScale
-
-                                SequentialAnimation on breathScale {
-                                    running: root.motionEnabled && !backend.listening && !backend.busy && !backend.recording && !backend.voiceSpeaking
-                                    loops: Animation.Infinite
-                                    NumberAnimation { to: 1.0 + 0.026 * root.animationStrength; duration: 1750; easing.type: Easing.InOutSine }
-                                    NumberAnimation { to: 1.0; duration: 1750; easing.type: Easing.InOutSine }
-                                }
-
-                                Rectangle {
-                                    id: ambientGlow
-                                    anchors.centerIn: parent
-                                    width: 278; height: 278; radius: 139
-                                    color: root.assistantStateColor
-                                    opacity: backend.listening || backend.busy ? 0.055 + orbStage.voiceLevel * 0.07 : 0.035
-                                    scale: 1 + orbStage.voiceLevel * 0.08 * root.animationStrength
-                                    Behavior on opacity { NumberAnimation { duration: 260 } }
-                                    Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-                                }
-
-                                Rectangle {
-                                    id: eventRing
-                                    anchors.centerIn: parent
-                                    width: 224; height: 224; radius: 112
-                                    color: "transparent"
-                                    border.width: 2
-                                    border.color: orbStage.eventColor
-                                    opacity: 0
-                                    scale: 0.86
-                                }
-
-                                Rectangle {
-                                    id: outerRing
-                                    anchors.centerIn: parent
-                                    width: 242; height: 242; radius: 121
-                                    color: "transparent"
-                                    border.width: backend.listening || backend.busy ? 2 : 1
-                                    border.color: root.assistantStateColor
-                                    opacity: backend.listening || backend.busy || backend.recording ? 0.78 : 0.42
-                                    scale: 1 + orbStage.voiceLevel * 0.055 * root.animationStrength
-                                    Behavior on border.color { ColorAnimation { duration: 220 } }
-                                    Behavior on opacity { NumberAnimation { duration: 220 } }
-                                    Behavior on scale { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
-                                }
-
-                                Item {
-                                    id: orbitSystem
-                                    anchors.centerIn: parent
-                                    width: 226; height: 226
-                                    visible: backend.busy || root.orbRecognizing || backend.voiceSpeaking
-                                    opacity: visible ? 0.95 : 0
-                                    Behavior on opacity { NumberAnimation { duration: 180 } }
-
-                                    RotationAnimation on rotation {
-                                        running: root.motionEnabled && orbitSystem.visible
-                                        from: 0
-                                        to: 360
-                                        loops: Animation.Infinite
-                                        duration: backend.busy ? 1250 : root.orbRecognizing ? 950 : 1800
-                                    }
-
-                                    Repeater {
-                                        model: 3
-                                        Rectangle {
-                                            required property int index
-                                            property real angle: index * Math.PI * 2 / 3
-                                            width: index === 0 ? 9 : 7
-                                            height: width
-                                            radius: width / 2
-                                            x: orbitSystem.width / 2 - width / 2 + Math.cos(angle) * 105
-                                            y: orbitSystem.height / 2 - height / 2 + Math.sin(angle) * 105
-                                            color: index === 0 ? "#E9E3FF" : root.assistantStateColor
-                                            opacity: index === 0 ? 1 : 0.68
-                                        }
-                                    }
-                                }
-
-                                Rectangle {
-                                    id: shell
-                                    anchors.centerIn: parent
-                                    width: 198; height: 198; radius: 99
-                                    color: "#111725"
-                                    border.width: 1
-                                    border.color: Qt.lighter(root.assistantStateColor, 1.08)
-                                    scale: 1 + orbStage.voiceLevel * 0.032 * root.animationStrength
-                                    Behavior on border.color { ColorAnimation { duration: 220 } }
-                                    Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        anchors.margins: 9
-                                        radius: width / 2
-                                        color: "transparent"
-                                        border.width: 1
-                                        border.color: "#22FFFFFF"
-                                    }
-                                }
-
-                                Rectangle {
-                                    id: orb
-                                    anchors.centerIn: parent
-                                    width: 156; height: 156; radius: 78
-                                    gradient: Gradient {
-                                        GradientStop {
-                                            position: 0.0
-                                            color: backend.recording ? "#FFC091" : backend.voiceSpeaking ? "#86E8AB" : backend.listening ? "#B8D7FF" : backend.busy ? "#B6A7FF" : "#9582F2"
-                                        }
-                                        GradientStop {
-                                            position: 0.43
-                                            color: backend.recording ? "#EE7045" : backend.voiceSpeaking ? "#39B976" : backend.listening ? "#725CFF" : backend.busy ? "#704CF1" : "#5940CB"
-                                        }
-                                        GradientStop {
-                                            position: 1.0
-                                            color: backend.recording ? "#5B1D1A" : backend.voiceSpeaking ? "#123E31" : backend.listening ? "#24165B" : "#211643"
-                                        }
-                                    }
-                                    scale: 1 + orbStage.voiceLevel * 0.095 * root.animationStrength
-                                    Behavior on scale { NumberAnimation { duration: 105; easing.type: Easing.OutCubic } }
-
-                                    Rectangle {
-                                        width: 92; height: 52; radius: 26
-                                        x: 20; y: 13
-                                        rotation: -16
-                                        color: "#FFFFFF"
-                                        opacity: 0.075
-                                    }
-
-                                    Rectangle {
-                                        anchors.centerIn: parent
-                                        width: 126; height: 126; radius: 63
-                                        color: "transparent"
-                                        border.width: 1
-                                        border.color: "#28FFFFFF"
-                                    }
-
-                                    Repeater {
-                                        model: 9
-                                        Rectangle {
-                                            required property int index
-                                            property real shapeFactor: 0.48 + ((index * 7) % 6) * 0.095
-                                            property real activeLevel: backend.listening ? Math.max(orbStage.voiceLevel, 0.14) : backend.voiceSpeaking ? 0.22 : 0.06
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: 3.5
-                                            radius: 2
-                                            height: 7 + activeLevel * (22 + shapeFactor * 30) * root.animationStrength
-                                            x: orb.width / 2 - width / 2 + (index - 4) * 11
-                                            color: "white"
-                                            opacity: backend.listening || backend.voiceSpeaking ? 0.92 : 0.64
-                                            Behavior on height { NumberAnimation { duration: 95; easing.type: Easing.OutCubic } }
-
-                                            SequentialAnimation on scale {
-                                                running: root.motionEnabled && backend.listening && root.microphoneVisualLevel < 0.04
-                                                loops: Animation.Infinite
-                                                PauseAnimation { duration: index * 34 }
-                                                NumberAnimation { to: 1.35; duration: 170; easing.type: Easing.InOutSine }
-                                                NumberAnimation { to: 0.72; duration: 210; easing.type: Easing.InOutSine }
-                                                NumberAnimation { to: 1.0; duration: 180; easing.type: Easing.InOutSine }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Rectangle {
-                                    id: flashOverlay
-                                    anchors.centerIn: parent
-                                    width: 164; height: 164; radius: 82
-                                    color: orbStage.eventColor
-                                    opacity: 0
-                                }
-
-                                ParallelAnimation {
-                                    id: wakeAnimation
-                                    SequentialAnimation {
-                                        NumberAnimation { target: orbStage; property: "eventScale"; to: 0.95; duration: 90; easing.type: Easing.OutCubic }
-                                        NumberAnimation { target: orbStage; property: "eventScale"; to: 1.045; duration: 145; easing.type: Easing.OutBack }
-                                        NumberAnimation { target: orbStage; property: "eventScale"; to: 1.0; duration: 180; easing.type: Easing.OutCubic }
-                                    }
-                                    SequentialAnimation {
-                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0.92; duration: 80 }
-                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0; duration: 360 }
-                                    }
-                                    NumberAnimation { target: eventRing; property: "scale"; to: 1.34; duration: 440; easing.type: Easing.OutCubic }
-                                }
-
-                                ParallelAnimation {
-                                    id: successAnimation
-                                    SequentialAnimation {
-                                        NumberAnimation { target: flashOverlay; property: "opacity"; to: 0.22; duration: 90 }
-                                        NumberAnimation { target: flashOverlay; property: "opacity"; to: 0; duration: 420 }
-                                    }
-                                    SequentialAnimation {
-                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0.9; duration: 80 }
-                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0; duration: 480 }
-                                    }
-                                    NumberAnimation { target: eventRing; property: "scale"; to: 1.45; duration: 560; easing.type: Easing.OutCubic }
-                                }
-
-                                ParallelAnimation {
-                                    id: stepAnimation
-                                    SequentialAnimation {
-                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0.58; duration: 55 }
-                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0; duration: 230 }
-                                    }
-                                    NumberAnimation { target: eventRing; property: "scale"; to: 1.18; duration: 285; easing.type: Easing.OutCubic }
-                                }
-
-                                SequentialAnimation {
-                                    id: reducedEventAnimation
-                                    NumberAnimation { target: flashOverlay; property: "opacity"; to: 0.17; duration: 70 }
-                                    NumberAnimation { target: flashOverlay; property: "opacity"; to: 0; duration: 250 }
-                                }
-
-                                ParallelAnimation {
-                                    id: errorAnimation
-                                    SequentialAnimation {
-                                        NumberAnimation { target: orbShake; property: "x"; to: -6; duration: 55 }
-                                        NumberAnimation { target: orbShake; property: "x"; to: 6; duration: 80 }
-                                        NumberAnimation { target: orbShake; property: "x"; to: -4; duration: 70 }
-                                        NumberAnimation { target: orbShake; property: "x"; to: 0; duration: 80 }
-                                    }
-                                    SequentialAnimation {
-                                        NumberAnimation { target: flashOverlay; property: "opacity"; to: 0.19; duration: 70 }
-                                        NumberAnimation { target: flashOverlay; property: "opacity"; to: 0; duration: 330 }
-                                    }
-                                    SequentialAnimation {
-                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0.82; duration: 70 }
-                                        NumberAnimation { target: eventRing; property: "opacity"; to: 0; duration: 330 }
-                                    }
-                                    NumberAnimation { target: eventRing; property: "scale"; to: 1.25; duration: 400; easing.type: Easing.OutCubic }
-                                }
-
-                                Connections {
-                                    target: backend
-                                    function onOrbVisualEvent(eventName) {
-                                        orbStage.playEvent(eventName)
-                                    }
-                                }
-                            }
-                            Text {
-                                Layout.alignment: Qt.AlignHCenter
-                                text: root.orbRecognizing ? "Распознаю…" : backend.listening ? "Говорите…" : backend.busy ? "Выполняю…" : backend.status
-                                color: root.textMain
-                                font.pixelSize: 17
-                                font.weight: Font.DemiBold
-                            }
-                            Text {
-                                Layout.alignment: Qt.AlignHCenter
-                                Layout.maximumWidth: 470
-                                horizontalAlignment: Text.AlignHCenter
-                                wrapMode: Text.WordWrap
-                                text: backend.transcript.length ? "«" + backend.transcript + "»" : "Скажите «Аура», затем назовите команду"
-                                color: root.textMuted
-                                font.pixelSize: 13
-                            }
-
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 10
-                                AppTextField {
-                                    id: testInput
-                                    Layout.fillWidth: true
-                                    placeholderText: "Например: открой калькулятор"
-                                    onAccepted: backend.executeText(text)
-                                }
-                                SoftButton {
-                                    text: "Проверить"
-                                    onClicked: backend.executeText(testInput.text)
-                                }
-                            }
-                        }
+                    HomePage {
+                        backendRef: backend
+                        accent: root.accent
+                        accentSoft: root.accentSoft
+                        panel: root.panel
+                        panelLight: root.panelLight
+                        line: root.line
+                        textMain: root.textMain
+                        textMuted: root.textMuted
+                        stateColor: root.assistantStateColor
+                        stateLabel: root.assistantStateLabel
+                        motionEnabled: root.motionEnabled
+                        animationStrength: root.animationStrength
+                        microphoneVisualLevel: root.microphoneVisualLevel
+                        onCreateCommandRequested: root.createCommand()
+                        onOpenPaletteRequested: root.openCommandPalette()
+                        onOpenCommandRequested: function(command) { root.editingCommand = command; editor.open() }
+                        onRunCommandRequested: function(commandId) { backend.runCommandById(commandId) }
                     }
 
-                    ColumnLayout {
-                        Layout.preferredWidth: 300
-                        Layout.fillHeight: true
-                        spacing: 20
+                    CommandsPage {
+                        backendRef: backend
+                        accent: root.accent
+                        accentSoft: root.accentSoft
+                        panel: root.panel
+                        panelLight: root.panelLight
+                        line: root.line
+                        textMain: root.textMain
+                        textMuted: root.textMuted
+                        onCreateCommandRequested: root.createCommand()
+                        onOpenCommandRequested: function(command) { root.editingCommand = command; editor.open() }
+                        onRunCommandRequested: function(commandId) { backend.runCommandById(commandId) }
+                        onTemplatesRequested: templateDialog.open()
+                    }
 
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            radius: 20
-                            color: root.panel
-                            border.color: root.line
+                    AutomationsPage {
+                        backendRef: backend
+                        accent: root.accent
+                        accentSoft: root.accentSoft
+                        panel: root.panel
+                        line: root.line
+                        textMain: root.textMain
+                        textMuted: root.textMuted
+                        onCreateAutomationRequested: root.createAdvancedCommand()
+                        onOpenCommandRequested: function(command) { root.editingCommand = command; editor.open() }
+                        onRunCommandRequested: function(commandId) { backend.runCommandById(commandId) }
+                        onTemplatesRequested: templateDialog.open()
+                    }
 
-                            ColumnLayout {
-                                anchors.fill: parent
-                                anchors.margins: 20
-                                spacing: 11
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Text { Layout.fillWidth: true; text: "Последние действия"; color: root.textMain; font.pixelSize: 16; font.bold: true }
-                                    Text { text: backend.history.length; color: root.textMuted; font.pixelSize: 12 }
-                                    ToolButton {
-                                        id: clearHistoryButton
-                                        visible: backend.history.length > 0
-                                        text: "Очистить"
-                                        onClicked: backend.clearHistory()
-                                        background: Rectangle { color: clearHistoryButton.hovered ? "#222A39" : "transparent"; radius: 8 }
-                                        contentItem: Text { text: clearHistoryButton.text; color: root.textMuted; font.pixelSize: 9; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                                    }
-                                }
-                                Rectangle { Layout.fillWidth: true; height: 1; color: root.line }
-                                Item {
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    Text {
-                                        anchors.centerIn: parent
-                                        visible: backend.history.length === 0
-                                        text: "История пока пуста"
-                                        color: "#606A7B"
-                                        font.pixelSize: 12
-                                    }
-                                    ListView {
-                                        anchors.fill: parent
-                                        visible: backend.history.length > 0
-                                        clip: true
-                                        spacing: 9
-                                        model: backend.history
-                                        delegate: Rectangle {
-                                            required property var modelData
-                                            width: ListView.view.width
-                                            height: 62
-                                            radius: 12
-                                            color: historyMouse.containsMouse ? "#181E2A" : "#151A25"
-                                            border.color: historyMouse.containsMouse ? "#30394A" : "transparent"
-                                            RowLayout {
-                                                anchors.fill: parent
-                                                anchors.leftMargin: 11
-                                                anchors.rightMargin: 11
-                                                spacing: 9
-                                                Rectangle {
-                                                    width: 7
-                                                    height: 7
-                                                    radius: 4
-                                                    color: modelData.tone === "error" ? "#FF6B7A" : modelData.tone === "warning" ? "#FFB45E" : "#43D17C"
-                                                }
-                                                ColumnLayout {
-                                                    Layout.fillWidth: true
-                                                    spacing: 3
-                                                    Text { Layout.fillWidth: true; text: modelData.phrase; color: root.textMain; font.pixelSize: 11; font.weight: Font.DemiBold; elide: Text.ElideRight }
-                                                    Text { Layout.fillWidth: true; text: modelData.result; color: root.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
-                                                }
-                                                Text { text: modelData.time || ""; color: "#626C7E"; font.pixelSize: 9; Layout.alignment: Qt.AlignTop }
-                                            }
-                                            MouseArea { id: historyMouse; anchors.fill: parent; hoverEnabled: true }
-                                        }
-                                    }
-                                }
-                            }
+                    HistoryPage {
+                        backendRef: backend
+                        panel: root.panel
+                        line: root.line
+                        textMain: root.textMain
+                        textMuted: root.textMuted
+                    }
+
+                    SettingsPage {
+                        backendRef: backend
+                        accent: root.accent
+                        accentSoft: root.accentSoft
+                        panel: root.panel
+                        line: root.line
+                        textMain: root.textMain
+                        textMuted: root.textMuted
+                        onAdvancedSettingsRequested: {
+                            backend.refreshMicrophones()
+                            settingsDialog.open()
                         }
                     }
                 }
             }
+        }
+    }
+
+
+    Window {
+        id: compactAssistant
+        width: 360
+        height: backend.busy ? 112 : 88
+        visible: !root.visible && (backend.listening || backend.busy || backend.voiceSpeaking || backend.recording)
+        color: "transparent"
+        flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+        x: Screen.desktopAvailableWidth - width - 24
+        y: Screen.desktopAvailableHeight - height - 24
+
+        Rectangle {
+            anchors.fill: parent
+            radius: 20
+            color: "#F0121721"
+            border.color: "#39445A"
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 14
+                spacing: 13
+                Rectangle {
+                    width: 48; height: 48; radius: 24
+                    color: root.assistantStateColor
+                    opacity: 0.9
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 31; height: 31; radius: 16
+                        color: "#45FFFFFF"
+                    }
+                    SequentialAnimation on scale {
+                        running: root.motionEnabled && compactAssistant.visible
+                        loops: Animation.Infinite
+                        NumberAnimation { to: 1.06; duration: 620; easing.type: Easing.InOutSine }
+                        NumberAnimation { to: 1.0; duration: 620; easing.type: Easing.InOutSine }
+                    }
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 3
+                    Text { Layout.fillWidth: true; text: backend.busy ? (backend.activeCommandName || "Выполняю команду") : root.assistantStateLabel; color: root.textMain; font.pixelSize: 13; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                    Text { Layout.fillWidth: true; text: backend.busy ? (backend.executionText || backend.status) : backend.transcript.length ? "«" + backend.transcript + "»" : backend.status; color: root.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
+                    Rectangle {
+                        visible: backend.busy
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 5
+                        radius: 3
+                        color: "#252C3A"
+                        Rectangle {
+                            width: parent.width * (backend.executionTotal > 0 ? Math.min(1, backend.executionCurrent / backend.executionTotal) : 0.08)
+                            height: parent.height
+                            radius: 3
+                            color: root.accent
+                            Behavior on width { NumberAnimation { duration: 160 } }
+                        }
+                    }
+                }
+                ToolButton {
+                    id: compactStop
+                    visible: backend.busy || backend.recording
+                    text: "■"
+                    onClicked: backend.stopExecution()
+                    background: Rectangle { radius: 10; color: compactStop.hovered ? "#38202A" : "#231A23" }
+                    contentItem: Text { text: compactStop.text; color: "#FF8C99"; font.pixelSize: 10; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                }
+            }
+
         }
     }
 
