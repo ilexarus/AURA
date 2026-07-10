@@ -116,8 +116,11 @@ class ActionExecutor:
         self.ensure_running()
         handlers = {
             "open_url": self._open_url,
+            "open_search": self._open_search,
             "open_app": self._open_app,
             "open_path": self._open_path,
+            "create_folder": self._create_folder,
+            "copy_text": self._copy_text,
             "hotkey": self._hotkey,
             "key": self._key,
             "type_text": self._type_text,
@@ -188,8 +191,11 @@ class ActionExecutor:
     def describe(step: ActionStep) -> str:
         labels = {
             "open_url": "Открываю сайт",
+            "open_search": "Ищу в интернете",
             "open_app": "Запускаю программу",
             "open_path": "Открываю файл или папку",
+            "create_folder": "Создаю папку",
+            "copy_text": "Копирую текст",
             "hotkey": "Нажимаю сочетание клавиш",
             "key": "Нажимаю клавишу",
             "type_text": "Вставляю текст",
@@ -213,6 +219,16 @@ class ActionExecutor:
         url = value if "://" in value else f"https://{value}"
         if not webbrowser.open(url):
             raise ActionError("Не удалось открыть ссылку")
+
+    @staticmethod
+    def _open_search(value: str) -> None:
+        from urllib.parse import quote_plus
+
+        query = value.strip()
+        if not query:
+            raise ActionError("Укажите поисковый запрос")
+        if not webbrowser.open(f"https://www.google.com/search?q={quote_plus(query)}"):
+            raise ActionError("Не удалось открыть поиск")
 
     def _open_app(self, value: str) -> None:
         alias = self.APP_ALIASES.get(value.lower())
@@ -248,6 +264,18 @@ class ActionExecutor:
                 subprocess.Popen(["xdg-open", str(path)])
         except OSError as exc:
             raise ActionError(f"Не удалось открыть путь: {exc}") from exc
+
+    @staticmethod
+    def _create_folder(value: str) -> None:
+        path = Path(os.path.expandvars(os.path.expanduser(value))).resolve()
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise ActionError(f"Не удалось создать папку: {exc}") from exc
+
+    @staticmethod
+    def _copy_text(value: str) -> None:
+        _copy_to_clipboard(value)
 
     @staticmethod
     def _hotkey(value: str) -> None:

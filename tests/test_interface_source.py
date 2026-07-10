@@ -90,8 +90,9 @@ class InterfaceSourceTests(unittest.TestCase):
 
     def test_safe_condition_actions_are_exposed(self) -> None:
         self.assertIn('Условие: файл существует', QML)
-        self.assertIn('require_window', BACKEND)
-        self.assertIn('require_time', BACKEND)
+        catalog = (ROOT / "aura" / "catalog.py").read_text(encoding="utf-8")
+        self.assertIn('require_window', catalog)
+        self.assertIn('require_time', catalog)
 
     def test_sidebar_is_compact_without_type_or_trigger_labels(self) -> None:
         sidebar = QML.split('id: commandColumn', 1)[1].split('SoftButton {', 1)[0]
@@ -112,7 +113,7 @@ class InterfaceSourceTests(unittest.TestCase):
         self.assertIn('id: editorFooter', QML)
         footer = QML.split('id: editorFooter', 1)[1].split('Dialog {', 1)[0]
         self.assertIn('anchors.bottom: parent.bottom', footer)
-        self.assertIn('text: backend.testingScenario ? "Проверяю…" : "▶  Проверить всё"', footer)
+        self.assertIn('text: backend.testingScenario ? "Проверяю…" : "▶  Пробный запуск"', footer)
         self.assertIn('text: "Отмена"', footer)
         self.assertIn('text: "Сохранить"', footer)
 
@@ -122,6 +123,42 @@ class InterfaceSourceTests(unittest.TestCase):
         self.assertIn('Сценарий запустится после одной из голосовых фраз', QML)
         self.assertIn('Сценарий запустится автоматически после старта AURA', QML)
 
+
+    def test_quality_release_features_are_wired(self) -> None:
+        self.assertIn('id: commandPalette', QML)
+        self.assertIn('id: actionPicker', QML)
+        self.assertIn('backend.validateDraft', QML)
+        self.assertIn('backend.duplicateCommand', QML)
+        self.assertIn('backend.exportCommand', QML)
+        self.assertIn('function onToastRequested', QML)
+
+
+    def test_easy_builder_is_the_default_new_command_flow(self) -> None:
+        self.assertIn('id: easyBuilder', QML)
+        self.assertIn('Три простых шага, без лишних настроек', QML)
+        self.assertIn('function createCommand()', QML)
+        create_block = QML.split('function createCommand()', 1)[1].split('function createAdvancedCommand()', 1)[0]
+        self.assertIn('easyBuilder.open()', create_block)
+        self.assertIn('backend.suggestCommandDraft', QML)
+
+    def test_advanced_options_are_hidden_until_requested(self) -> None:
+        self.assertIn('property bool showAutomationSettings: false', QML)
+        self.assertIn('text: editor.showAutomationSettings ? "Скрыть автоматизацию" : "Расписание и режим"', QML)
+        self.assertIn('property bool advancedOpen: retry_count > 0 || continue_on_error', QML)
+        self.assertIn('text: actionCard.advancedOpen ? "Скрыть настройки" : "Дополнительно"', QML)
+
+    def test_easy_builder_supports_native_file_pickers(self) -> None:
+        self.assertIn('backend.chooseProgram()', QML)
+        self.assertIn('backend.chooseFile()', QML)
+        self.assertIn('backend.chooseFolder()', QML)
+        self.assertIn('def chooseProgram', BACKEND)
+        self.assertIn('def chooseFile', BACKEND)
+        self.assertIn('def chooseFolder', BACKEND)
+
+    def test_advanced_step_options_are_persisted(self) -> None:
+        self.assertIn('"retry_count": Number(item.retry_count || 0)', QML)
+        self.assertIn('"continue_on_error": Boolean(item.continue_on_error)', QML)
+        self.assertIn('Продолжить при ошибке', QML)
 
 
 if __name__ == "__main__":

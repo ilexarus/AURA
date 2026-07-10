@@ -28,12 +28,39 @@ ApplicationWindow {
     property string testedStepState: ""
     property string testedStepMessage: ""
     property string scenarioTestMessage: ""
+    property var editorValidation: ({ valid: false, errors: 0, warnings: 0, issues: [] })
+    property string toastText: ""
+    property string toastTone: "neutral"
+    property string paletteSearch: ""
+    property string actionPickerSearch: ""
     property color assistantStateColor: backend.recording ? "#FF9A62" : backend.listening ? "#65B8FF" : backend.busy ? "#8A6BFF" : backend.voiceSpeaking ? "#43D17C" : backend.wakeListening ? root.accent : "#536071"
     property string assistantStateLabel: backend.recording ? "Запись действий" : backend.listening ? "Микрофон активен" : backend.busy ? "Выполняю действие" : backend.voiceSpeaking ? "Отвечаю" : backend.wakeListening ? "Жду фразу «Аура»" : "Готов к работе"
     property bool orbRecognizing: backend.listening && backend.status.toLowerCase().indexOf("распозна") >= 0
     property real animationStrength: backend.animationIntensity === "low" ? 0.58 : backend.animationIntensity === "high" ? 1.28 : 1.0
     property real microphoneVisualLevel: backend.microphoneReactiveAnimation ? backend.audioLevel / 100.0 : 0.0
     property bool motionEnabled: !backend.reduceMotion
+
+    function createCommand() {
+        root.editingCommand = null
+        easyBuilder.open()
+    }
+
+    function createAdvancedCommand() {
+        root.editingCommand = null
+        editor.open()
+    }
+
+    function openSettings() {
+        backend.refreshMicrophones()
+        settingsDialog.open()
+    }
+
+    function openCommandPalette() { commandPalette.open() }
+    function openActionPicker() { actionPicker.open() }
+
+    Shortcut { sequence: "Ctrl+K"; onActivated: root.openCommandPalette() }
+    Shortcut { sequence: "Ctrl+N"; onActivated: root.createCommand() }
+    Shortcut { sequence: "Ctrl+,"; onActivated: root.openSettings() }
 
     font.family: "Segoe UI"
 
@@ -62,6 +89,8 @@ ApplicationWindow {
     component AccentButton: Button {
         id: control
         implicitHeight: 42
+        opacity: control.enabled ? 1.0 : 0.42
+        Behavior on opacity { NumberAnimation { duration: 120 } }
         leftPadding: 18
         rightPadding: 18
         font.pixelSize: 14
@@ -283,14 +312,30 @@ ApplicationWindow {
                                         }
                                     }
                                 }
+                                Menu {
+                                    id: commandContextMenu
+                                    MenuItem { text: "Открыть"; onTriggered: { root.editingCommand = modelData; editor.open() } }
+                                    MenuItem { text: "Запустить"; enabled: modelData.enabled; onTriggered: backend.runCommandById(modelData.id) }
+                                    MenuSeparator {}
+                                    MenuItem { text: "Создать копию"; onTriggered: backend.duplicateCommand(modelData.id) }
+                                    MenuItem { text: "Экспортировать"; onTriggered: backend.exportCommand(modelData.id) }
+                                    MenuItem { text: modelData.enabled ? "Отключить" : "Включить"; onTriggered: backend.setCommandEnabled(modelData.id, !modelData.enabled) }
+                                    MenuSeparator {}
+                                    MenuItem { text: "Удалить"; onTriggered: backend.deleteCommand(modelData.id) }
+                                }
                                 MouseArea {
                                     id: commandMouse
                                     anchors.fill: parent
                                     hoverEnabled: true
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        root.editingCommand = modelData
-                                        editor.open()
+                                    onClicked: function(mouse) {
+                                        if (mouse.button === Qt.RightButton) {
+                                            commandContextMenu.popup()
+                                        } else {
+                                            root.editingCommand = modelData
+                                            editor.open()
+                                        }
                                     }
                                 }
                             }
@@ -300,11 +345,8 @@ ApplicationWindow {
 
                 SoftButton {
                     Layout.fillWidth: true
-                    text: "+  Новая команда"
-                    onClicked: {
-                        root.editingCommand = null
-                        editor.open()
-                    }
+                    text: "+  Создать команду"
+                    onClicked: root.createCommand()
                 }
 
                 SoftButton {
@@ -316,10 +358,7 @@ ApplicationWindow {
                 SoftButton {
                     Layout.fillWidth: true
                     text: "⚙  Настройки"
-                    onClicked: {
-                        backend.refreshMicrophones()
-                        settingsDialog.open()
-                    }
+                    onClicked: root.openSettings()
                 }
 
             }
@@ -366,18 +405,19 @@ ApplicationWindow {
                     }
                     Rectangle {
                         height: 36
-                        width: shortcutText.width + 24
+                        width: shortcutText.width + 28
                         radius: 11
-                        color: "#141925"
-                        border.color: root.line
+                        color: paletteMouse.containsMouse ? "#1B2130" : "#141925"
+                        border.color: paletteMouse.containsMouse ? "#39445A" : root.line
                         Text {
                             id: shortcutText
                             anchors.centerIn: parent
-                            text: "Ctrl  +  Shift  +  Space"
+                            text: "Ctrl  +  K   Быстрый запуск"
                             color: "#AAB2C1"
                             font.pixelSize: 11
                             font.family: "Consolas"
                         }
+                        MouseArea { id: paletteMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.openCommandPalette() }
                     }
                 }
 
@@ -729,6 +769,14 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                     Text { Layout.fillWidth: true; text: "Последние действия"; color: root.textMain; font.pixelSize: 16; font.bold: true }
                                     Text { text: backend.history.length; color: root.textMuted; font.pixelSize: 12 }
+                                    ToolButton {
+                                        id: clearHistoryButton
+                                        visible: backend.history.length > 0
+                                        text: "Очистить"
+                                        onClicked: backend.clearHistory()
+                                        background: Rectangle { color: clearHistoryButton.hovered ? "#222A39" : "transparent"; radius: 8 }
+                                        contentItem: Text { text: clearHistoryButton.text; color: root.textMuted; font.pixelSize: 9; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                    }
                                 }
                                 Rectangle { Layout.fillWidth: true; height: 1; color: root.line }
                                 Item {
@@ -860,14 +908,360 @@ ApplicationWindow {
     }
 
     Dialog {
-        id: editor
-        width: Math.min(760, root.width - 48)
-        height: Math.min(840, root.height - 32)
+        id: easyBuilder
+        width: Math.min(650, root.width - 42)
+        height: Math.min(650, root.height - 44)
         anchors.centerIn: parent
         modal: true
         dim: true
         closePolicy: Popup.CloseOnEscape
         padding: 0
+        background: Rectangle { radius: 22; color: "#121722"; border.color: "#303747" }
+        Overlay.modal: Rectangle { color: "#AA05070B" }
+
+        property int step: 0
+        property string selectedActionType: ""
+        property var quickActions: [
+            { type: "open_url", icon: "↗", title: "Открыть сайт", description: "YouTube, почта или любая страница" },
+            { type: "open_app", icon: "▣", title: "Открыть программу", description: "Калькулятор, браузер или другое приложение" },
+            { type: "open_path", icon: "▤", title: "Открыть файл или папку", description: "Документ, фотография или рабочая папка" },
+            { type: "open_search", icon: "⌕", title: "Найти в интернете", description: "Открыть готовый поисковый запрос" },
+            { type: "hotkey", icon: "⌘", title: "Нажать сочетание", description: "Например Ctrl + Shift + S" },
+            { type: "type_text", icon: "T", title: "Вставить текст", description: "Ввести подготовленный текст в активное поле" }
+        ]
+
+        function actionTitle(type) {
+            for (var i = 0; i < quickActions.length; ++i)
+                if (quickActions[i].type === type) return quickActions[i].title
+            return "Действие"
+        }
+
+        function targetTitle() {
+            if (selectedActionType === "open_url") return "Адрес сайта"
+            if (selectedActionType === "open_app") return "Программа"
+            if (selectedActionType === "open_path") return "Файл или папка"
+            if (selectedActionType === "open_search") return "Что найти"
+            if (selectedActionType === "hotkey") return "Сочетание клавиш"
+            if (selectedActionType === "type_text") return "Текст"
+            return "Значение"
+        }
+
+        function targetHint() {
+            if (selectedActionType === "open_url") return "youtube.com"
+            if (selectedActionType === "open_app") return "Выберите EXE или напишите calc"
+            if (selectedActionType === "open_path") return "Выберите файл или папку"
+            if (selectedActionType === "open_search") return "Например: погода на завтра"
+            if (selectedActionType === "hotkey") return "Например: ctrl+shift+s"
+            if (selectedActionType === "type_text") return "Введите текст, который AURA должна вставить"
+            return ""
+        }
+
+        function normalizedTarget() {
+            var value = quickTargetField.text.trim()
+            if (selectedActionType === "open_url" && value.length > 0 && value.indexOf("://") < 0)
+                return "https://" + value
+            return value
+        }
+
+        function prepareNames() {
+            var suggestion = backend.suggestCommandDraft(selectedActionType, normalizedTarget())
+            quickNameField.text = suggestion.name || actionTitle(selectedActionType)
+            quickPhraseField.text = suggestion.phrase || quickNameField.text.toLowerCase()
+        }
+
+        function openAdvanced() {
+            var actions = []
+            if (selectedActionType.length > 0) {
+                actions.push({
+                    "action_type": selectedActionType,
+                    "value": normalizedTarget(),
+                    "delay_after": 0,
+                    "enabled": true,
+                    "retry_count": 0,
+                    "continue_on_error": false
+                })
+            }
+            root.recordedActions = actions.length > 0 ? actions : null
+            root.recordingDraft = {
+                "name": quickNameField.text,
+                "phrases": quickPhraseField.text,
+                "confirmation": false,
+                "commandType": "command",
+                "triggerType": "voice",
+                "triggerValue": ""
+            }
+            close()
+            editor.open()
+        }
+
+        function saveQuickCommand() {
+            var actions = [{
+                "action_type": selectedActionType,
+                "value": normalizedTarget(),
+                "delay_after": 0,
+                "enabled": true,
+                "retry_count": 0,
+                "continue_on_error": false
+            }]
+            var saved = backend.saveAutomationCommand(
+                "",
+                quickNameField.text,
+                quickPhraseField.text,
+                JSON.stringify(actions),
+                false,
+                "command",
+                "voice",
+                ""
+            )
+            if (saved) close()
+        }
+
+        onOpened: {
+            step = 0
+            selectedActionType = ""
+            quickTargetField.text = ""
+            quickNameField.text = ""
+            quickPhraseField.text = ""
+        }
+
+        contentItem: ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 20
+            spacing: 12
+
+            Item {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 54
+                Column {
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    Text { text: "Создать команду"; color: root.textMain; font.pixelSize: 22; font.bold: true }
+                    Text { text: "Три простых шага, без лишних настроек"; color: root.textMuted; font.pixelSize: 12; topPadding: 4 }
+                }
+                AuraCloseButton { anchors.top: parent.top; anchors.right: parent.right; anchors.topMargin: -14; anchors.rightMargin: -14; onClicked: easyBuilder.close() }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 7
+                Repeater {
+                    model: 3
+                    delegate: Rectangle {
+                        Layout.fillWidth: true
+                        height: 5
+                        radius: 3
+                        color: index <= easyBuilder.step ? root.accent : "#303747"
+                        Behavior on color { ColorAnimation { duration: 140 } }
+                    }
+                }
+            }
+
+            StackLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                currentIndex: easyBuilder.step
+
+                Item {
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 12
+                        Text { text: "1. Что должна сделать AURA?"; color: root.textMain; font.pixelSize: 16; font.weight: Font.DemiBold }
+                        Text { text: "Выберите самое подходящее действие. Остальное AURA заполнит сама."; color: root.textMuted; font.pixelSize: 11 }
+                        GridLayout {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            columns: 2
+                            columnSpacing: 10
+                            rowSpacing: 10
+                            Repeater {
+                                model: easyBuilder.quickActions
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    Layout.minimumHeight: 92
+                                    radius: 15
+                                    color: quickActionMouse.containsMouse ? "#1C2331" : "#151A25"
+                                    border.color: quickActionMouse.containsMouse ? "#4B3A82" : root.line
+                                    Behavior on color { ColorAnimation { duration: 120 } }
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 13
+                                        spacing: 11
+                                        Rectangle {
+                                            width: 42; height: 42; radius: 13; color: "#211B3B"
+                                            Text { anchors.centerIn: parent; text: modelData.icon; color: root.accentSoft; font.pixelSize: 17; font.bold: true }
+                                        }
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 3
+                                            Text { Layout.fillWidth: true; text: modelData.title; color: root.textMain; font.pixelSize: 13; font.weight: Font.DemiBold; wrapMode: Text.WordWrap }
+                                            Text { Layout.fillWidth: true; text: modelData.description; color: root.textMuted; font.pixelSize: 9; wrapMode: Text.WordWrap }
+                                        }
+                                    }
+                                    MouseArea {
+                                        id: quickActionMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            easyBuilder.selectedActionType = modelData.type
+                                            easyBuilder.step = 1
+                                            quickTargetField.forceActiveFocus()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        SoftButton {
+                            Layout.fillWidth: true
+                            text: "●  Показать действия AURA"
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Запишите клики и нажатия, затем AURA создаст шаги"
+                            onClicked: {
+                                root.recordingDraft = { "name": "", "phrases": "", "confirmation": false, "commandType": "command", "triggerType": "voice", "triggerValue": "" }
+                                easyBuilder.close()
+                                backend.startRecording()
+                            }
+                        }
+                    }
+                }
+
+                Item {
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 13
+                        Text { text: "2. " + easyBuilder.targetTitle(); color: root.textMain; font.pixelSize: 16; font.weight: Font.DemiBold }
+                        Text { text: "Укажите только главное. Технические параметры можно изменить позже."; color: root.textMuted; font.pixelSize: 11 }
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 126
+                            radius: 15
+                            color: "#151A25"
+                            border.color: root.line
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 14
+                                spacing: 8
+                                Text { text: easyBuilder.actionTitle(easyBuilder.selectedActionType); color: root.accentSoft; font.pixelSize: 12; font.weight: Font.DemiBold }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    AppTextField {
+                                        id: quickTargetField
+                                        Layout.fillWidth: true
+                                        placeholderText: easyBuilder.targetHint()
+                                        onAccepted: if (text.trim().length > 0) { easyBuilder.prepareNames(); easyBuilder.step = 2 }
+                                    }
+                                    SoftButton {
+                                        visible: easyBuilder.selectedActionType === "open_app"
+                                        text: "Выбрать"
+                                        onClicked: {
+                                            var selected = backend.chooseProgram()
+                                            if (selected.length > 0) quickTargetField.text = selected
+                                        }
+                                    }
+                                    SoftButton {
+                                        visible: easyBuilder.selectedActionType === "open_path"
+                                        text: "Файл"
+                                        onClicked: {
+                                            var selected = backend.chooseFile()
+                                            if (selected.length > 0) quickTargetField.text = selected
+                                        }
+                                    }
+                                    SoftButton {
+                                        visible: easyBuilder.selectedActionType === "open_path"
+                                        text: "Папка"
+                                        onClicked: {
+                                            var selected = backend.chooseFolder()
+                                            if (selected.length > 0) quickTargetField.text = selected
+                                        }
+                                    }
+                                }
+                                Text { Layout.fillWidth: true; text: easyBuilder.targetHint(); color: root.textMuted; font.pixelSize: 9; wrapMode: Text.WordWrap }
+                            }
+                        }
+                        Item { Layout.fillHeight: true }
+                    }
+                }
+
+                Item {
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 12
+                        Text { text: "3. Как запускать команду?"; color: root.textMain; font.pixelSize: 16; font.weight: Font.DemiBold }
+                        Text { text: "AURA уже предложила название и фразу. Их можно изменить."; color: root.textMuted; font.pixelSize: 11 }
+                        Text { text: "Название"; color: root.textMain; font.pixelSize: 11; font.weight: Font.DemiBold }
+                        AppTextField { id: quickNameField; Layout.fillWidth: true; placeholderText: "Название команды" }
+                        Text { text: "Скажите после слова «Аура»"; color: root.textMain; font.pixelSize: 11; font.weight: Font.DemiBold }
+                        AppTextField { id: quickPhraseField; Layout.fillWidth: true; placeholderText: "Например: открой YouTube"; onAccepted: if (text.trim().length > 0 && quickNameField.text.trim().length > 0) easyBuilder.saveQuickCommand() }
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 76
+                            radius: 14
+                            color: "#151A25"
+                            border.color: root.line
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 13
+                                spacing: 10
+                                Rectangle { width: 36; height: 36; radius: 12; color: "#211B3B"; Text { anchors.centerIn: parent; text: "✓"; color: root.accentSoft; font.bold: true } }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Text { Layout.fillWidth: true; text: easyBuilder.actionTitle(easyBuilder.selectedActionType); color: root.textMain; font.pixelSize: 12; font.weight: Font.DemiBold }
+                                    Text { Layout.fillWidth: true; text: easyBuilder.normalizedTarget(); color: root.textMuted; font.pixelSize: 9; elide: Text.ElideMiddle }
+                                }
+                            }
+                        }
+                        Item { Layout.fillHeight: true }
+                    }
+                }
+            }
+
+            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.line }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 9
+                SoftButton {
+                    visible: easyBuilder.step > 0
+                    text: "Назад"
+                    onClicked: easyBuilder.step--
+                }
+                SoftButton {
+                    text: "Расширенный редактор"
+                    onClicked: easyBuilder.openAdvanced()
+                }
+                Item { Layout.fillWidth: true }
+                AccentButton {
+                    text: easyBuilder.step === 2 ? "Создать команду" : "Далее"
+                    enabled: easyBuilder.step === 0
+                        ? easyBuilder.selectedActionType.length > 0
+                        : easyBuilder.step === 1
+                            ? quickTargetField.text.trim().length > 0
+                            : quickNameField.text.trim().length > 0 && quickPhraseField.text.trim().length > 0
+                    onClicked: {
+                        if (easyBuilder.step === 1) {
+                            easyBuilder.prepareNames()
+                            easyBuilder.step = 2
+                            quickPhraseField.forceActiveFocus()
+                        } else if (easyBuilder.step === 2) {
+                            easyBuilder.saveQuickCommand()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: editor
+        width: Math.min(820, root.width - 32)
+        height: Math.min(880, root.height - 20)
+        anchors.centerIn: parent
+        modal: true
+        dim: true
+        closePolicy: Popup.CloseOnEscape
+        padding: 0
+        property bool showAutomationSettings: false
         background: Rectangle {
             radius: 22
             color: "#121722"
@@ -875,15 +1269,16 @@ ApplicationWindow {
         }
         Overlay.modal: Rectangle { color: "#AA05070B" }
 
-        function addAction(type, value, delayAfter, enabled) {
+        function addAction(type, value, delayAfter, enabled, retryCount, continueOnError) {
             actionModel.append({
                 "action_type": type || "open_url",
                 "value": value || "",
                 "delay_after": Number(delayAfter || 0),
-                // The editor uses a dedicated role name because `enabled`
-                // collides with Item.enabled inside a QML delegate.
-                "step_enabled": enabled === undefined ? true : Boolean(enabled)
+                "step_enabled": enabled === undefined ? true : Boolean(enabled),
+                "retry_count": Number(retryCount || 0),
+                "continue_on_error": Boolean(continueOnError || false)
             })
+            scheduleValidation()
         }
 
         function collectActions() {
@@ -894,7 +1289,9 @@ ApplicationWindow {
                     "action_type": item.action_type,
                     "value": item.value,
                     "delay_after": Number(item.delay_after || 0),
-                    "enabled": Boolean(item.step_enabled)
+                    "enabled": Boolean(item.step_enabled),
+                    "retry_count": Number(item.retry_count || 0),
+                    "continue_on_error": Boolean(item.continue_on_error)
                 })
             }
             return actions
@@ -922,8 +1319,11 @@ ApplicationWindow {
                 "action_type": item.action_type,
                 "value": item.value,
                 "delay_after": Number(item.delay_after || 0),
-                "step_enabled": Boolean(item.step_enabled)
+                "step_enabled": Boolean(item.step_enabled),
+                "retry_count": Number(item.retry_count || 0),
+                "continue_on_error": Boolean(item.continue_on_error)
             })
+            scheduleValidation()
         }
 
         function moveAction(from, to) {
@@ -933,7 +1333,21 @@ ApplicationWindow {
             root.testedStepIndex = -1
             root.testedStepState = ""
             root.testedStepMessage = ""
+            scheduleValidation()
         }
+
+        function scheduleValidation() {
+            validationTimer.restart()
+        }
+
+        function refreshValidation() {
+            root.editorValidation = backend.validateDraft(
+                nameField.text, phrasesField.text, collectActionsJson(),
+                commandTypeCombo.currentValue, triggerCombo.currentValue, triggerTimeField.text
+            )
+        }
+
+        Timer { id: validationTimer; interval: 130; repeat: false; onTriggered: editor.refreshValidation() }
 
         function actionIndex(type) {
             for (var i = 0; i < actionChoices.length; ++i) {
@@ -945,8 +1359,11 @@ ApplicationWindow {
 
         function actionHint(type) {
             if (type === "open_url") return "https://youtube.com"
+            if (type === "open_search") return "Что нужно найти"
             if (type === "open_app") return "calc или C:\\Путь\\app.exe"
             if (type === "open_path") return "C:\\Users\\Имя\\Documents"
+            if (type === "create_folder") return "C:\\Проекты\\Новая папка"
+            if (type === "copy_text") return "Текст для буфера обмена"
             if (type === "hotkey") return "ctrl+shift+s"
             if (type === "key") return "volumeup"
             if (type === "type_text") return "Текст, который нужно вставить"
@@ -966,8 +1383,11 @@ ApplicationWindow {
 
         property var actionChoices: [
             { label: "Открыть сайт", value: "open_url" },
+            { label: "Найти в интернете", value: "open_search" },
             { label: "Открыть программу", value: "open_app" },
             { label: "Открыть файл или папку", value: "open_path" },
+            { label: "Создать папку", value: "create_folder" },
+            { label: "Скопировать текст", value: "copy_text" },
             { label: "Нажать сочетание клавиш", value: "hotkey" },
             { label: "Нажать одну клавишу", value: "key" },
             { label: "Вставить текст", value: "type_text" },
@@ -1009,17 +1429,18 @@ ApplicationWindow {
             commandTypeCombo.currentIndex = choiceIndex(commandTypeChoices, draft ? draft.commandType : (command ? command.command_type : "command"))
             triggerCombo.currentIndex = choiceIndex(triggerChoices, draft ? draft.triggerType : (command ? command.trigger_type : "voice"))
             triggerTimeField.text = draft ? draft.triggerValue : (command ? command.trigger_value : "09:00")
+            showAutomationSettings = Boolean(command && (command.command_type !== "command" || command.trigger_type !== "voice"))
             actionModel.clear()
 
             if (root.recordedActions && root.recordedActions.length > 0) {
                 for (var recordedIndex = 0; recordedIndex < root.recordedActions.length; ++recordedIndex) {
                     var recordedStep = root.recordedActions[recordedIndex]
-                    addAction(recordedStep.action_type, recordedStep.value, recordedStep.delay_after, recordedStep.enabled)
+                    addAction(recordedStep.action_type, recordedStep.value, recordedStep.delay_after, recordedStep.enabled, recordedStep.retry_count, recordedStep.continue_on_error)
                 }
             } else if (command && command.actions && command.actions.length > 0) {
                 for (var i = 0; i < command.actions.length; ++i) {
                     var step = command.actions[i]
-                    addAction(step.action_type, step.value, step.delay_after, step.enabled)
+                    addAction(step.action_type, step.value, step.delay_after, step.enabled, step.retry_count, step.continue_on_error)
                 }
             } else {
                 addAction("open_url", "", 0)
@@ -1031,22 +1452,23 @@ ApplicationWindow {
             root.testedStepMessage = ""
             root.scenarioTestMessage = ""
             nameField.forceActiveFocus()
+            scheduleValidation()
         }
 
         contentItem: ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 24
-            spacing: 10
+            anchors.margins: 18
+            spacing: 8
 
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 48
+                Layout.preferredHeight: 44
 
                 Column {
                     anchors.left: parent.left
                     anchors.top: parent.top
                     Text { text: root.editingCommand ? "Редактировать команду" : "Новая команда"; color: root.textMain; font.pixelSize: 21; font.bold: true }
-                    Text { text: "Программирование не требуется"; color: root.textMuted; font.pixelSize: 12; topPadding: 3 }
+                    Text { text: "Расширенные настройки можно не менять"; color: root.textMuted; font.pixelSize: 12; topPadding: 3 }
                 }
 
                 AuraCloseButton {
@@ -1060,7 +1482,7 @@ ApplicationWindow {
             }
 
             Text { text: "Название"; color: root.textMain; font.pixelSize: 12; font.weight: Font.DemiBold }
-            AppTextField { id: nameField; Layout.fillWidth: true; placeholderText: "Например: Открыть рабочие сайты" }
+            AppTextField { id: nameField; Layout.fillWidth: true; placeholderText: "Например: Открыть рабочие сайты"; onTextEdited: editor.scheduleValidation() }
 
             Text { text: "Что можно сказать"; color: root.textMain; font.pixelSize: 12; font.weight: Font.DemiBold }
             AppTextField {
@@ -1069,16 +1491,29 @@ ApplicationWindow {
                 enabled: triggerCombo.currentValue === "voice"
                 opacity: enabled ? 1 : 0.45
                 placeholderText: "начать работу, открой рабочие сайты"
+                onTextEdited: editor.scheduleValidation()
             }
-            Text {
-                text: triggerCombo.currentValue === "voice" ? "Несколько фраз разделяйте запятыми" : "Для автоматического запуска голосовая фраза необязательна"
-                color: root.textMuted
-                font.pixelSize: 10
+            RowLayout {
+                Layout.fillWidth: true
+                Text {
+                    Layout.fillWidth: true
+                    text: triggerCombo.currentValue === "voice" ? "Несколько фраз разделяйте запятыми" : "Для автоматического запуска голосовая фраза необязательна"
+                    color: root.textMuted
+                    font.pixelSize: 10
+                }
+                ToolButton {
+                    id: automationSettingsButton
+                    text: editor.showAutomationSettings ? "Скрыть автоматизацию" : "Расписание и режим"
+                    onClicked: editor.showAutomationSettings = !editor.showAutomationSettings
+                    contentItem: Text { text: automationSettingsButton.text; color: root.accentSoft; font.pixelSize: 10; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { radius: 9; color: automationSettingsButton.hovered ? "#211B3B" : "transparent" }
+                }
             }
 
             Rectangle {
+                visible: editor.showAutomationSettings
                 Layout.fillWidth: true
-                Layout.preferredHeight: 108
+                Layout.preferredHeight: visible ? 96 : 0
                 radius: 14
                 color: "#151A25"
                 border.color: root.line
@@ -1100,6 +1535,7 @@ ApplicationWindow {
                             valueRole: "value"
                             contentItem: Text { leftPadding: 11; text: commandTypeCombo.displayText; color: root.textMain; font.pixelSize: 11; verticalAlignment: Text.AlignVCenter }
                             background: Rectangle { radius: 10; color: "#0D111A"; border.color: root.line }
+                            onActivated: editor.scheduleValidation()
                         }
                         Text {
                             Layout.fillWidth: true
@@ -1125,6 +1561,7 @@ ApplicationWindow {
                             valueRole: "value"
                             contentItem: Text { leftPadding: 11; text: triggerCombo.displayText; color: root.textMain; font.pixelSize: 11; verticalAlignment: Text.AlignVCenter }
                             background: Rectangle { radius: 10; color: "#0D111A"; border.color: root.line }
+                            onActivated: editor.scheduleValidation()
                         }
                         Text {
                             Layout.fillWidth: true
@@ -1144,8 +1581,34 @@ ApplicationWindow {
                         Layout.alignment: Qt.AlignTop
                         spacing: 4
                         Text { text: "Время"; color: root.textMuted; font.pixelSize: 9 }
-                        AppTextField { id: triggerTimeField; Layout.fillWidth: true; Layout.preferredHeight: 36; placeholderText: "09:00" }
+                        AppTextField { id: triggerTimeField; Layout.fillWidth: true; Layout.preferredHeight: 36; placeholderText: "09:00"; onTextEdited: editor.scheduleValidation() }
                     }
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 38
+                radius: 11
+                color: root.editorValidation.valid ? "#14271F" : "#291922"
+                border.color: root.editorValidation.valid ? "#27543D" : "#5C2B3A"
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    spacing: 8
+                    Text { text: root.editorValidation.valid ? "✓" : "!"; color: root.editorValidation.valid ? "#62E39B" : "#FF8C99"; font.bold: true }
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.editorValidation.valid
+                            ? (root.editorValidation.warnings > 0 ? "Можно сохранить, замечаний: " + root.editorValidation.warnings : "Сценарий заполнен корректно")
+                            : (root.editorValidation.issues && root.editorValidation.issues.length > 0
+                                ? root.editorValidation.issues[0].message
+                                : "Нужно исправить: " + root.editorValidation.errors)
+                        color: root.textMain
+                        font.pixelSize: 10
+                    }
+                    Text { text: "Проверяется автоматически"; color: root.textMuted; font.pixelSize: 9 }
                 }
             }
 
@@ -1153,7 +1616,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Text {
                     Layout.fillWidth: true
-                    text: "Действия"
+                    text: "Что нужно сделать"
                     color: root.textMain
                     font.pixelSize: 12
                     font.weight: Font.DemiBold
@@ -1162,7 +1625,7 @@ ApplicationWindow {
                     Layout.preferredHeight: 36
                     Layout.minimumWidth: 112
                     Layout.alignment: Qt.AlignVCenter
-                    text: "●  Записать"
+                    text: "●  Записать действия"
                     onClicked: {
                         root.recordingDraft = {
                             "name": nameField.text,
@@ -1180,8 +1643,8 @@ ApplicationWindow {
                     Layout.preferredHeight: 36
                     Layout.minimumWidth: 112
                     Layout.alignment: Qt.AlignVCenter
-                    text: "+  Добавить"
-                    onClicked: editor.addAction("open_url", "", 0)
+                    text: "+  Добавить шаг"
+                    onClicked: root.openActionPicker()
                 }
             }
 
@@ -1189,7 +1652,7 @@ ApplicationWindow {
                 id: actionsList
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.minimumHeight: 112
+                Layout.minimumHeight: 148
                 clip: true
                 spacing: 10
                 model: actionModel
@@ -1202,10 +1665,13 @@ ApplicationWindow {
                     required property string value
                     required property real delay_after
                     required property bool step_enabled
+                    required property int retry_count
+                    required property bool continue_on_error
                     readonly property bool stepEnabled: step_enabled
                     property bool testSelected: root.testedStepIndex === actionCard.index
+                    property bool advancedOpen: retry_count > 0 || continue_on_error
                     width: actionsList.width - (actionsList.ScrollBar.vertical.visible ? 12 : 0)
-                    height: 154
+                    height: 150
                     radius: 14
                     color: actionHover.hovered ? "#181E2A" : "#151A25"
                     opacity: stepEnabled ? 1 : 0.55
@@ -1258,6 +1724,7 @@ ApplicationWindow {
                                 onActivated: {
                                     actionModel.setProperty(actionCard.index, "action_type", currentValue)
                                     root.testedStepIndex = -1
+                                    editor.scheduleValidation()
                                 }
                                 contentItem: Text {
                                     leftPadding: 12
@@ -1332,6 +1799,7 @@ ApplicationWindow {
                                 onClicked: {
                                     actionModel.remove(actionCard.index)
                                     root.testedStepIndex = -1
+                                    editor.scheduleValidation()
                                 }
                                 background: Rectangle { color: removeStepButton.hovered ? "#30202A" : "transparent"; radius: 10 }
                                 contentItem: Text { text: removeStepButton.text; color: "#D88A98"; font: removeStepButton.font; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
@@ -1352,6 +1820,7 @@ ApplicationWindow {
                                 onTextEdited: {
                                     actionModel.setProperty(actionCard.index, "value", text)
                                     root.testedStepIndex = -1
+                                    editor.scheduleValidation()
                                 }
                             }
 
@@ -1380,6 +1849,7 @@ ApplicationWindow {
                                     onTextEdited: {
                                         var parsed = Number(text.replace(",", "."))
                                         actionModel.setProperty(actionCard.index, "delay_after", isNaN(parsed) ? 0 : parsed)
+                                        editor.scheduleValidation()
                                     }
                                 }
                             }
@@ -1395,16 +1865,48 @@ ApplicationWindow {
                                 onToggled: {
                                     actionModel.setProperty(actionCard.index, "step_enabled", checked)
                                     root.testedStepIndex = -1
+                                    editor.scheduleValidation()
                                 }
                                 indicator: Rectangle {
-                                    implicitWidth: 18
-                                    implicitHeight: 18
-                                    radius: 6
+                                    implicitWidth: 18; implicitHeight: 18; radius: 6
                                     color: stepEnabledCheck.checked ? root.accent : "#0D111A"
                                     border.color: stepEnabledCheck.checked ? root.accent : root.line
                                     Text { anchors.centerIn: parent; visible: stepEnabledCheck.checked; text: "✓"; color: "white"; font.pixelSize: 11; font.bold: true }
                                 }
                                 contentItem: Text { leftPadding: 25; text: stepEnabledCheck.text; color: root.textMuted; font.pixelSize: 10; verticalAlignment: Text.AlignVCenter }
+                            }
+                            ToolButton {
+                                id: stepAdvancedButton
+                                text: actionCard.advancedOpen ? "Скрыть настройки" : "Дополнительно"
+                                onClicked: actionCard.advancedOpen = !actionCard.advancedOpen
+                                contentItem: Text { text: stepAdvancedButton.text; color: root.accentSoft; font.pixelSize: 9; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                background: Rectangle { radius: 8; color: stepAdvancedButton.hovered ? "#211B3B" : "transparent" }
+                            }
+                            Text { visible: actionCard.advancedOpen; text: "Повторы"; color: root.textMuted; font.pixelSize: 9 }
+                            ComboBox {
+                                visible: actionCard.advancedOpen
+                                id: retryCombo
+                                Layout.preferredWidth: 58
+                                Layout.preferredHeight: 28
+                                model: [0, 1, 2, 3, 4, 5]
+                                currentIndex: Math.max(0, Math.min(5, actionCard.retry_count))
+                                onActivated: { actionModel.setProperty(actionCard.index, "retry_count", currentValue); editor.scheduleValidation() }
+                                contentItem: Text { leftPadding: 9; text: retryCombo.displayText; color: root.textMain; font.pixelSize: 10; verticalAlignment: Text.AlignVCenter }
+                                background: Rectangle { radius: 8; color: "#0D111A"; border.color: root.line }
+                            }
+                            CheckBox {
+                                id: continueOnErrorCheck
+                                visible: actionCard.advancedOpen
+                                checked: actionCard.continue_on_error
+                                text: "Продолжить при ошибке"
+                                onToggled: { actionModel.setProperty(actionCard.index, "continue_on_error", checked); editor.scheduleValidation() }
+                                indicator: Rectangle {
+                                    implicitWidth: 16; implicitHeight: 16; radius: 5
+                                    color: continueOnErrorCheck.checked ? root.accent : "#0D111A"
+                                    border.color: continueOnErrorCheck.checked ? root.accent : root.line
+                                    Text { anchors.centerIn: parent; visible: continueOnErrorCheck.checked; text: "✓"; color: "white"; font.pixelSize: 9; font.bold: true }
+                                }
+                                contentItem: Text { leftPadding: 22; text: continueOnErrorCheck.text; color: root.textMuted; font.pixelSize: 9; verticalAlignment: Text.AlignVCenter }
                             }
                             Text {
                                 Layout.fillWidth: true
@@ -1416,27 +1918,23 @@ ApplicationWindow {
                             }
                             ToolButton {
                                 id: moveUpButton
-                                implicitWidth: 30
-                                implicitHeight: 26
+                                implicitWidth: 28; implicitHeight: 26
                                 enabled: actionCard.index > 0
                                 text: "↑"
-                                ToolTip.visible: hovered
-                                ToolTip.text: "Переместить выше"
+                                ToolTip.visible: hovered; ToolTip.text: "Переместить выше"
                                 onClicked: editor.moveAction(actionCard.index, actionCard.index - 1)
                                 background: Rectangle { color: moveUpButton.hovered ? "#222A39" : "transparent"; radius: 8 }
-                                contentItem: Text { text: moveUpButton.text; color: moveUpButton.enabled ? root.textMuted : "#424A58"; font.pixelSize: 15; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                contentItem: Text { text: moveUpButton.text; color: moveUpButton.enabled ? root.textMuted : "#424A58"; font.pixelSize: 14; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                             }
                             ToolButton {
                                 id: moveDownButton
-                                implicitWidth: 30
-                                implicitHeight: 26
+                                implicitWidth: 28; implicitHeight: 26
                                 enabled: actionCard.index < actionModel.count - 1
                                 text: "↓"
-                                ToolTip.visible: hovered
-                                ToolTip.text: "Переместить ниже"
+                                ToolTip.visible: hovered; ToolTip.text: "Переместить ниже"
                                 onClicked: editor.moveAction(actionCard.index, actionCard.index + 1)
                                 background: Rectangle { color: moveDownButton.hovered ? "#222A39" : "transparent"; radius: 8 }
-                                contentItem: Text { text: moveDownButton.text; color: moveDownButton.enabled ? root.textMuted : "#424A58"; font.pixelSize: 15; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                contentItem: Text { text: moveDownButton.text; color: moveDownButton.enabled ? root.textMuted : "#424A58"; font.pixelSize: 14; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                             }
                         }
                     }
@@ -1467,8 +1965,8 @@ ApplicationWindow {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 54
-                radius: 13
+                Layout.preferredHeight: 48
+                radius: 12
                 color: "#151A25"
                 RowLayout {
                     anchors.fill: parent
@@ -1520,8 +2018,8 @@ ApplicationWindow {
             Rectangle {
                 id: editorFooter
                 Layout.fillWidth: true
-                Layout.preferredHeight: 58
-                Layout.minimumHeight: 58
+                Layout.preferredHeight: 54
+                Layout.minimumHeight: 54
                 color: "transparent"
 
                 Rectangle {
@@ -1555,7 +2053,7 @@ ApplicationWindow {
                         Layout.minimumWidth: 132
                         Layout.alignment: Qt.AlignVCenter
                         enabled: !backend.testingScenario && backend.testingActionIndex < 0
-                        text: backend.testingScenario ? "Проверяю…" : "▶  Проверить всё"
+                        text: backend.testingScenario ? "Проверяю…" : "▶  Пробный запуск"
                         onClicked: {
                             root.scenarioTestMessage = "Запускаю проверку сценария…"
                             backend.testScenario(editor.collectActionsJson())
@@ -1574,6 +2072,9 @@ ApplicationWindow {
                         Layout.minimumWidth: 120
                         Layout.alignment: Qt.AlignVCenter
                         text: "Сохранить"
+                        enabled: Boolean(root.editorValidation.valid)
+                        ToolTip.visible: hovered && !enabled
+                        ToolTip.text: "Исправьте ошибки сценария"
                         onClicked: {
                             var saved = backend.saveAutomationCommand(
                                 root.editingCommand ? root.editingCommand.id : "",
@@ -1864,6 +2365,8 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 AccentButton { text: "Создать копию"; onClicked: backend.createBackup() }
                                 SoftButton { text: "Восстановить"; onClicked: backend.restoreBackup() }
+                                SoftButton { text: "Импорт команд"; onClicked: backend.importCommands() }
+                                SoftButton { text: "Экспорт команд"; onClicked: backend.exportAllCommands() }
                                 SoftButton { text: "Открыть папку"; onClicked: backend.openBackupsFolder() }
                                 Item { Layout.fillWidth: true }
                             }
@@ -2352,8 +2855,142 @@ ApplicationWindow {
         }
     }
 
+    Dialog {
+        id: actionPicker
+        width: Math.min(680, root.width - 70)
+        height: Math.min(620, root.height - 70)
+        anchors.centerIn: parent
+        modal: true
+        padding: 0
+        closePolicy: Popup.CloseOnEscape
+        background: Rectangle { radius: 22; color: "#121722"; border.color: "#303747" }
+        Overlay.modal: Rectangle { color: "#AA05070B" }
+        onOpened: { root.actionPickerSearch = ""; actionPickerField.text = ""; actionPickerField.forceActiveFocus() }
+
+        contentItem: ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 22
+            spacing: 12
+            Item {
+                Layout.fillWidth: true; Layout.preferredHeight: 46
+                Column { anchors.left: parent.left; Text { text: "Добавить действие"; color: root.textMain; font.pixelSize: 20; font.bold: true } Text { text: "Выберите безопасный блок для сценария"; color: root.textMuted; font.pixelSize: 11; topPadding: 3 } }
+                AuraCloseButton { anchors.top: parent.top; anchors.right: parent.right; anchors.topMargin: -12; anchors.rightMargin: -12; onClicked: actionPicker.close() }
+            }
+            AppTextField { id: actionPickerField; Layout.fillWidth: true; placeholderText: "Поиск действия"; onTextChanged: root.actionPickerSearch = text.trim().toLowerCase() }
+            Flickable {
+                Layout.fillWidth: true; Layout.fillHeight: true; clip: true
+                contentHeight: actionPickerColumn.height
+                ScrollBar.vertical: ScrollBar {}
+                Column {
+                    id: actionPickerColumn; width: parent.width; spacing: 8
+                    Repeater {
+                        model: backend.actionCatalog
+                        delegate: Rectangle {
+                            required property var modelData
+                            property bool matches: root.actionPickerSearch.length === 0
+                                || String(modelData.label).toLowerCase().indexOf(root.actionPickerSearch) >= 0
+                                || String(modelData.description).toLowerCase().indexOf(root.actionPickerSearch) >= 0
+                                || String(modelData.category).toLowerCase().indexOf(root.actionPickerSearch) >= 0
+                            width: actionPickerColumn.width
+                            height: matches ? 66 : 0
+                            visible: matches
+                            radius: 13
+                            color: actionPickMouse.containsMouse ? "#1B2230" : "#151A25"
+                            border.color: modelData.dangerous ? "#5A3A2B" : root.line
+                            RowLayout {
+                                anchors.fill: parent; anchors.margins: 11; spacing: 11
+                                Rectangle { width: 36; height: 36; radius: 11; color: modelData.dangerous ? "#30231C" : "#211B3B"; Text { anchors.centerIn: parent; text: modelData.icon; color: modelData.dangerous ? "#FFB27C" : root.accentSoft; font.pixelSize: 14; font.bold: true } }
+                                ColumnLayout { Layout.fillWidth: true; spacing: 2
+                                    RowLayout { Layout.fillWidth: true; Text { Layout.fillWidth: true; text: modelData.label; color: root.textMain; font.pixelSize: 12; font.weight: Font.DemiBold } Text { text: modelData.category; color: root.textMuted; font.pixelSize: 9 } }
+                                    Text { Layout.fillWidth: true; text: modelData.description; color: root.textMuted; font.pixelSize: 9; elide: Text.ElideRight }
+                                }
+                            }
+                            MouseArea { id: actionPickMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { editor.addAction(modelData.type, "", 0, true, 0, false); actionPicker.close() } }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: commandPalette
+        width: Math.min(620, root.width - 80)
+        height: Math.min(560, root.height - 90)
+        x: Math.round((root.width - width) / 2)
+        y: Math.max(26, (root.height - height) * 0.22)
+        modal: true
+        padding: 0
+        closePolicy: Popup.CloseOnEscape
+        background: Rectangle { radius: 22; color: "#121722"; border.color: "#394258" }
+        Overlay.modal: Rectangle { color: "#9905070B" }
+        onOpened: { root.paletteSearch = ""; paletteField.text = ""; paletteField.forceActiveFocus() }
+        contentItem: ColumnLayout {
+            anchors.fill: parent; anchors.margins: 18; spacing: 10
+            RowLayout { Layout.fillWidth: true
+                Text { Layout.fillWidth: true; text: "Быстрый запуск"; color: root.textMain; font.pixelSize: 18; font.bold: true }
+                Text { text: "Ctrl + K"; color: root.textMuted; font.pixelSize: 10; font.family: "Consolas" }
+            }
+            AppTextField { id: paletteField; Layout.fillWidth: true; placeholderText: "Команда, настройка или действие"; onTextChanged: root.paletteSearch = text.trim().toLowerCase() }
+            RowLayout { Layout.fillWidth: true; spacing: 8
+                SoftButton { Layout.fillWidth: true; text: "+ Новая команда"; onClicked: { commandPalette.close(); root.createCommand() } }
+                SoftButton { Layout.fillWidth: true; text: "⚙ Настройки"; onClicked: { commandPalette.close(); root.openSettings() } }
+                SoftButton { Layout.fillWidth: true; text: "Шаблоны"; onClicked: { commandPalette.close(); templateDialog.open() } }
+            }
+            Text { text: "КОМАНДЫ"; color: "#626C7E"; font.pixelSize: 9; font.bold: true; font.letterSpacing: 1.1 }
+            Flickable { Layout.fillWidth: true; Layout.fillHeight: true; clip: true; contentHeight: paletteColumn.height; ScrollBar.vertical: ScrollBar {}
+                Column { id: paletteColumn; width: parent.width; spacing: 6
+                    Repeater { model: backend.commands
+                        delegate: Rectangle {
+                            required property var modelData
+                            property bool matches: root.paletteSearch.length === 0 || String(modelData.name).toLowerCase().indexOf(root.paletteSearch) >= 0 || String(modelData.phrases_text).toLowerCase().indexOf(root.paletteSearch) >= 0
+                            width: paletteColumn.width; height: matches ? 54 : 0; visible: matches; radius: 12
+                            color: paletteCommandMouse.containsMouse ? "#1B2230" : "transparent"; opacity: modelData.enabled ? 1 : 0.45
+                            RowLayout { anchors.fill: parent; anchors.leftMargin: 11; anchors.rightMargin: 11; spacing: 9
+                                Rectangle { width: 7; height: 7; radius: 4; color: modelData.quality_tone === "error" ? "#FF6B7A" : modelData.quality_tone === "warning" ? "#F4B860" : "#43D17C" }
+                                ColumnLayout { Layout.fillWidth: true; spacing: 1
+                                    Text { Layout.fillWidth: true; text: modelData.name; color: root.textMain; font.pixelSize: 12; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                                    Text { Layout.fillWidth: true; text: modelData.preview; color: root.textMuted; font.pixelSize: 9; elide: Text.ElideRight }
+                                }
+                                Text { text: modelData.quality_label; color: root.textMuted; font.pixelSize: 8 }
+                            }
+                            MouseArea { id: paletteCommandMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: { commandPalette.close(); backend.runCommandById(modelData.id) } }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        id: toast
+        width: Math.min(390, Math.max(250, toastMessage.implicitWidth + 58))
+        height: 52
+        radius: 14
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: 24
+        anchors.bottomMargin: 24
+        z: 200
+        visible: opacity > 0
+        opacity: root.toastText.length > 0 ? 1 : 0
+        color: root.toastTone === "error" ? "#2A1820" : root.toastTone === "warning" ? "#2A2317" : root.toastTone === "success" ? "#15281F" : "#171D29"
+        border.color: root.toastTone === "error" ? "#663040" : root.toastTone === "warning" ? "#665126" : root.toastTone === "success" ? "#2B5B42" : root.line
+        Behavior on opacity { NumberAnimation { duration: 170 } }
+        RowLayout { anchors.fill: parent; anchors.margins: 12; spacing: 9
+            Text { text: root.toastTone === "error" ? "!" : root.toastTone === "warning" ? "•" : root.toastTone === "success" ? "✓" : "i"; color: root.toastTone === "error" ? "#FF8C99" : root.toastTone === "warning" ? "#FFD079" : root.toastTone === "success" ? "#62E39B" : root.accentSoft; font.bold: true }
+            Text { id: toastMessage; Layout.fillWidth: true; text: root.toastText; color: root.textMain; font.pixelSize: 11; elide: Text.ElideRight }
+        }
+        Timer { id: toastTimer; interval: 3300; repeat: false; onTriggered: root.toastText = "" }
+    }
+
     Connections {
         target: backend
+        function onToastRequested(text, tone) {
+            root.toastText = text
+            root.toastTone = tone
+            toastTimer.restart()
+        }
         function onActionTestResult(index, success, message) {
             root.testedStepIndex = index
             root.testedStepState = success ? "success" : "error"

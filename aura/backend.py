@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+from urllib.parse import urlparse
 from datetime import datetime
 from pathlib import Path
 
@@ -16,7 +17,9 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QFileDialog
 
 from .actions import ActionError, ActionExecutor
+from .catalog import ACTION_CATALOG, ACTION_CATEGORIES, ACTION_LABELS, ACTION_BY_TYPE
 from .engine import CommandMatcher
+from .history import ActivityStore
 from .models import ActionStep, VoiceCommand
 from .recorder import ActionRecorder
 from .settings import AssistantSettings, SettingsStore
@@ -42,6 +45,7 @@ from .update_client import (
 from .voice_assets import resolve_voice_file, voice_pack_is_ready
 from .voice_feedback import VoiceFeedbackWorker
 from .voice_utils import strip_leading_wake_phrase, is_silent_speech_capture_error
+from .validation import validate_command, validate_step
 from .wakeword import WakeWordWorker
 
 try:
@@ -49,28 +53,6 @@ try:
 except ImportError:
     keyboard = None
 
-
-ACTION_CATALOG = [
-    {"type": "open_url", "label": "Открыть сайт", "hint": "https://example.com"},
-    {"type": "open_app", "label": "Открыть программу", "hint": "calc, notepad или путь к EXE"},
-    {"type": "open_path", "label": "Открыть файл или папку", "hint": r"C:\Users\Имя\Documents"},
-    {"type": "hotkey", "label": "Нажать сочетание", "hint": "ctrl+shift+s"},
-    {"type": "key", "label": "Нажать клавишу", "hint": "volumeup, enter, playpause"},
-    {"type": "type_text", "label": "Вставить текст", "hint": "Текст для вставки"},
-    {"type": "wait", "label": "Подождать", "hint": "Количество секунд, например 2"},
-    {"type": "mouse_click", "label": "Клик мышью", "hint": "x,y,left,1"},
-    {"type": "mouse_scroll", "label": "Прокрутить", "hint": "Число шагов, например -5"},
-    {"type": "activate_window", "label": "Активировать окно", "hint": "Часть заголовка окна"},
-    {"type": "wait_window", "label": "Дождаться окна", "hint": "Название окна|10"},
-    {"type": "minimize_window", "label": "Свернуть окно", "hint": "Часть заголовка окна"},
-    {"type": "maximize_window", "label": "Развернуть окно", "hint": "Часть заголовка окна"},
-    {"type": "close_window", "label": "Закрыть окно", "hint": "Часть заголовка окна"},
-    {"type": "require_file", "label": "Условие: файл существует", "hint": r"C:\Путь\к\файлу"},
-    {"type": "require_window", "label": "Условие: окно открыто", "hint": "Часть заголовка окна"},
-    {"type": "require_time", "label": "Условие: время", "hint": "09:00-18:00"},
-    {"type": "shell", "label": "Системная команда", "hint": "Команда CMD. Используйте осторожно"},
-]
-ACTION_LABELS = {item["type"]: item["label"] for item in ACTION_CATALOG}
 
 MODE_TEMPLATES = [
     {
@@ -403,6 +385,7 @@ class AssistantBackend(QObject):
     audioLevelChanged = Signal()
     orbVisualEvent = Signal(str)
     executionStateChanged = Signal()
+    toastRequested = Signal(str, str)
 
     def __init__(
         self,
@@ -449,7 +432,16 @@ class AssistantBackend(QObject):
         self._listening = False
         self._busy = False
         self._recording = False
-        self._history: list[dict[str, str]] = []
+        self._history_store = ActivityStore(self._data_dir)
+        self._history: list[dict[str, str]] = [
+            {
+                "phrase": str(item.get("title", "")),
+                "result": str(item.get("result", "")),
+                "time": str(item.get("time", "")),
+                "tone": str(item.get("tone", "neutral")),
+            }
+            for item in self._history_store.all()
+        ]
         self._pending_command: VoiceCommand | None = None
         self._active_command: VoiceCommand | None = None
         self._execution_current = 0
@@ -539,6 +531,9 @@ class AssistantBackend(QObject):
             trigger_label = TRIGGER_LABELS.get(command.trigger_type, command.trigger_type)
             if command.trigger_type == "daily" and command.trigger_value:
                 trigger_label = f"Каждый день в {command.trigger_value}"
+            validation = validate_command(command)
+            errors = sum(1 for issue in validation if issue.level == "error")
+            warnings = sum(1 for issue in validation if issue.level == "warning")
             result.append({
                 **command.to_dict(),
                 "actions": actions,
@@ -550,12 +545,18 @@ class AssistantBackend(QObject):
                 "action_label": ACTION_LABELS.get(first_step.action_type, first_step.action_type),
                 "trigger_label": trigger_label,
                 "type_label": "режим компьютера" if command.command_type == "mode" else "обычная команда",
+                "quality_tone": "error" if errors else "warning" if warnings else "success",
+                "quality_label": f"{errors} ошибок" if errors else f"{warnings} замечаний" if warnings else "Готово",
             })
         return result
 
     @Property("QVariantList", constant=True)
-    def actionCatalog(self) -> list[dict[str, str]]:
+    def actionCatalog(self) -> list[dict[str, object]]:
         return ACTION_CATALOG
+
+    @Property("QVariantList", constant=True)
+    def actionCategories(self) -> list[str]:
+        return list(ACTION_CATEGORIES)
 
     @Property("QVariantList", constant=True)
     def modeTemplates(self) -> list[dict[str, object]]:
@@ -708,6 +709,76 @@ class AssistantBackend(QObject):
     @Slot(str, result=str)
     def actionLabel(self, action_type: str) -> str:
         return ACTION_LABELS.get(action_type, action_type)
+
+    @Slot(str, str, result="QVariantMap")
+    def suggestCommandDraft(self, action_type: str, value: str) -> dict[str, str]:
+        """Return a short, human-friendly name and voice phrase for the easy builder."""
+        action_type = str(action_type or "open_url").strip()
+        value = str(value or "").strip()
+
+        label = ACTION_LABELS.get(action_type, "Выполнить действие")
+        subject = ""
+        if action_type == "open_url":
+            raw = value if "://" in value else f"https://{value}"
+            try:
+                host = urlparse(raw).netloc.lower().split(":", 1)[0]
+            except ValueError:
+                host = ""
+            known = {
+                "youtube.com": "YouTube",
+                "www.youtube.com": "YouTube",
+                "google.com": "Google",
+                "www.google.com": "Google",
+                "mail.google.com": "Gmail",
+                "github.com": "GitHub",
+                "vk.com": "ВКонтакте",
+                "yandex.ru": "Яндекс",
+                "www.yandex.ru": "Яндекс",
+            }
+            subject = known.get(host, host.removeprefix("www.").split(".")[0].capitalize() if host else "сайт")
+            name = f"Открыть {subject}"
+        elif action_type == "open_app":
+            subject = Path(value.strip('"')).stem if value else "программу"
+            subject = subject.replace("_", " ").replace("-", " ").strip() or "программу"
+            name = f"Открыть {subject}"
+        elif action_type == "open_path":
+            subject = Path(value.strip('"').rstrip("\\/")).name if value else "файл или папку"
+            name = f"Открыть {subject or 'файл или папку'}"
+        elif action_type == "open_search":
+            name = f"Найти {value}" if value else "Найти в интернете"
+        elif action_type == "hotkey":
+            name = f"Нажать {value}" if value else "Нажать сочетание клавиш"
+        elif action_type == "type_text":
+            name = "Вставить текст"
+        elif action_type == "copy_text":
+            name = "Скопировать текст"
+        elif action_type == "key":
+            name = f"Нажать клавишу {value}" if value else "Нажать клавишу"
+        else:
+            name = label
+
+        name = " ".join(name.split())[:120]
+        phrase = name[:1].lower() + name[1:] if name else "выполни команду"
+        return {"name": name, "phrase": phrase, "label": label}
+
+    @Slot(result=str)
+    def chooseProgram(self) -> str:
+        filename, _ = QFileDialog.getOpenFileName(
+            None,
+            "Выберите программу",
+            "",
+            "Программы Windows (*.exe *.com *.bat *.cmd);;Все файлы (*)",
+        )
+        return filename or ""
+
+    @Slot(result=str)
+    def chooseFile(self) -> str:
+        filename, _ = QFileDialog.getOpenFileName(None, "Выберите файл", "", "Все файлы (*)")
+        return filename or ""
+
+    @Slot(result=str)
+    def chooseFolder(self) -> str:
+        return QFileDialog.getExistingDirectory(None, "Выберите папку", "") or ""
 
     @Slot()
     def toggleListening(self) -> None:
@@ -1321,6 +1392,149 @@ class AssistantBackend(QObject):
         self._set_busy(False)
         QTimer.singleShot(180, self.startWakeListening)
 
+    @Slot(str, str, str, str, str, str, result="QVariantMap")
+    def validateDraft(
+        self,
+        name: str,
+        phrases_text: str,
+        actions_json: str,
+        command_type: str,
+        trigger_type: str,
+        trigger_value: str,
+    ) -> dict[str, object]:
+        phrases = [item.strip() for item in phrases_text.replace("\n", ",").split(",") if item.strip()]
+        try:
+            raw_actions = json.loads(actions_json)
+            actions = [ActionStep.from_dict(item) for item in raw_actions if isinstance(item, dict)] if isinstance(raw_actions, list) else []
+        except (json.JSONDecodeError, TypeError):
+            actions = []
+        command = VoiceCommand(
+            name=name.strip(),
+            phrases=phrases,
+            actions=actions,
+            command_type=command_type,
+            trigger_type=trigger_type,
+            trigger_value=trigger_value.strip(),
+        )
+        issues = validate_command(command)
+        return {
+            "valid": not any(issue.level == "error" for issue in issues),
+            "errors": sum(1 for issue in issues if issue.level == "error"),
+            "warnings": sum(1 for issue in issues if issue.level == "warning"),
+            "issues": [issue.to_dict() for issue in issues],
+        }
+
+    @Slot(str, str, result="QVariantMap")
+    def validateAction(self, action_type: str, value: str) -> dict[str, object]:
+        issues = validate_step(ActionStep(action_type=action_type, value=value), 0)
+        return {
+            "valid": not any(issue.level == "error" for issue in issues),
+            "issues": [issue.to_dict() for issue in issues],
+        }
+
+    @Slot(str)
+    def duplicateCommand(self, command_id: str) -> None:
+        original = next((item for item in self.store.all() if item.id == command_id), None)
+        if original is None:
+            self._notify("Команда не найдена", "error")
+            return
+        payload = original.to_dict()
+        payload.pop("id", None)
+        payload["name"] = self._unique_command_name(f"{original.name}, копия")
+        duplicated_actions = []
+        for step in payload.get("actions", []):
+            if isinstance(step, dict):
+                step = dict(step)
+                step.pop("id", None)
+                duplicated_actions.append(step)
+        payload["actions"] = duplicated_actions
+        duplicate = VoiceCommand.from_dict(payload)
+        self.store.save(duplicate)
+        self.commandsChanged.emit()
+        self._notify(f"Создана копия «{duplicate.name}»", "success")
+
+    def _unique_command_name(self, base: str) -> str:
+        existing = {item.name.casefold() for item in self.store.all()}
+        candidate = base[:120]
+        number = 2
+        while candidate.casefold() in existing:
+            suffix = f" {number}"
+            candidate = f"{base[:120-len(suffix)]}{suffix}"
+            number += 1
+        return candidate
+
+    @Slot(str)
+    def exportCommand(self, command_id: str) -> None:
+        command = next((item for item in self.store.all() if item.id == command_id), None)
+        if command is None:
+            self._notify("Команда не найдена", "error")
+            return
+        safe_name = "".join(ch if ch.isalnum() or ch in "-_ " else "_" for ch in command.name).strip() or "command"
+        filename, _ = QFileDialog.getSaveFileName(None, "Экспорт команды", f"{safe_name}.aura.json", "AURA command (*.aura.json)")
+        if not filename:
+            return
+        try:
+            Path(filename).write_text(json.dumps({"format": "aura-command", "version": 1, "command": command.to_dict()}, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._notify("Команда экспортирована", "success")
+        except OSError as exc:
+            logging.exception("Unable to export command")
+            self._notify(f"Ошибка экспорта: {exc}", "error")
+
+    @Slot()
+    def exportAllCommands(self) -> None:
+        filename, _ = QFileDialog.getSaveFileName(None, "Экспорт команд", "AURA-commands.json", "AURA commands (*.json)")
+        if not filename:
+            return
+        try:
+            payload = {"format": "aura-commands", "version": 1, "commands": [item.to_dict() for item in self.store.all()]}
+            Path(filename).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._notify("Все команды экспортированы", "success")
+        except OSError as exc:
+            logging.exception("Unable to export commands")
+            self._notify(f"Ошибка экспорта: {exc}", "error")
+
+    @Slot()
+    def importCommands(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(None, "Импорт команд", "", "AURA files (*.json *.aura.json)")
+        if not filename:
+            return
+        try:
+            payload = json.loads(Path(filename).read_text(encoding="utf-8"))
+            raw = payload.get("commands") if isinstance(payload, dict) else payload
+            if isinstance(payload, dict) and isinstance(payload.get("command"), dict):
+                raw = [payload["command"]]
+            if not isinstance(raw, list):
+                raise ValueError("Файл не содержит список команд")
+            imported = 0
+            for item in raw:
+                if not isinstance(item, dict):
+                    continue
+                item = dict(item)
+                item.pop("id", None)
+                item["name"] = self._unique_command_name(str(item.get("name") or "Импортированная команда"))
+                for step in item.get("actions", []):
+                    if isinstance(step, dict):
+                        step.pop("id", None)
+                command = VoiceCommand.from_dict(item)
+                if any(step.action_type == "shell" for step in command.actions):
+                    command.require_confirmation = True
+                if any(issue.level == "error" for issue in validate_command(command)):
+                    continue
+                self.store.save(command)
+                imported += 1
+            self.commandsChanged.emit()
+            self._notify(f"Импортировано команд: {imported}", "success" if imported else "warning")
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            logging.exception("Unable to import commands")
+            self._notify(f"Ошибка импорта: {exc}", "error")
+
+    @Slot()
+    def clearHistory(self) -> None:
+        self._history_store.clear()
+        self._history = []
+        self.historyChanged.emit()
+        self._notify("История очищена", "success")
+
     @Slot(str, str, str, str, bool, result=bool)
     def saveCommand(self, command_id: str, name: str, phrases_text: str, actions_json: str, require_confirmation: bool) -> bool:
         existing = next((item for item in self.store.all() if item.id == command_id), None)
@@ -1387,19 +1601,6 @@ class AssistantBackend(QObject):
         else:
             trigger_value = ""
 
-        # Voice phrases are optional for purely automatic scenarios.
-        if not name.strip() or not actions or (trigger_type == "voice" and not phrases):
-            self._set_status("Заполните название, фразы и добавьте хотя бы одно действие")
-            return False
-        allowed_types = set(ACTION_LABELS)
-        for step in actions:
-            if step.action_type not in allowed_types:
-                self._set_status("В сценарии есть неизвестное действие")
-                return False
-            if not step.value.strip() and step.action_type != "wait":
-                self._set_status("Заполните значения всех действий")
-                return False
-
         command = VoiceCommand(
             id=command_id or VoiceCommand("", [], []).id,
             name=name.strip()[:120],
@@ -1410,6 +1611,12 @@ class AssistantBackend(QObject):
             trigger_type=trigger_type,
             trigger_value=trigger_value,
         )
+        issues = validate_command(command)
+        errors = [issue.message for issue in issues if issue.level == "error"]
+        if errors:
+            self._set_status(errors[0])
+            self._notify(errors[0], "error")
+            return False
         existing = next((item for item in self.store.all() if item.id == command.id), None)
         if existing:
             command.enabled = existing.enabled
@@ -1417,6 +1624,7 @@ class AssistantBackend(QObject):
         self.commandsChanged.emit()
         noun = "Режим" if command.command_type == "mode" else "Команда"
         self._set_status(f"{noun} «{command.name}» сохранён")
+        self._notify(f"{noun} сохранён", "success")
         return True
 
     @Slot(str)
@@ -1464,6 +1672,7 @@ class AssistantBackend(QObject):
         self.store.save(command)
         self.commandsChanged.emit()
         self._set_status(f"Шаблон «{name}» добавлен")
+        self._notify("Шаблон добавлен", "success")
 
     @Slot(str)
     def deleteCommand(self, command_id: str) -> None:
@@ -1471,6 +1680,7 @@ class AssistantBackend(QObject):
         self.store.delete(command_id)
         self.commandsChanged.emit()
         self._set_status(f"Команда «{command.name}» удалена" if command else "Команда удалена")
+        self._notify("Команда удалена", "warning")
 
     @Slot(str, bool)
     def setCommandEnabled(self, command_id: str, enabled: bool) -> None:
@@ -2045,14 +2255,20 @@ class AssistantBackend(QObject):
     def _add_history(self, phrase: str, result: str) -> None:
         normalized = result.casefold()
         tone = "error" if "ошиб" in normalized or "не найден" in normalized else "warning" if "отмен" in normalized else "success"
-        self._history.insert(0, {
-            "phrase": phrase,
-            "result": result,
-            "time": datetime.now().strftime("%H:%M"),
-            "tone": tone,
-        })
-        self._history = self._history[:20]
+        rows = self._history_store.add(phrase, result, tone)
+        self._history = [
+            {
+                "phrase": str(item.get("title", "")),
+                "result": str(item.get("result", "")),
+                "time": str(item.get("time", "")),
+                "tone": str(item.get("tone", "neutral")),
+            }
+            for item in rows
+        ]
         self.historyChanged.emit()
+
+    def _notify(self, text: str, tone: str = "neutral") -> None:
+        self.toastRequested.emit(str(text)[:240], tone if tone in {"success", "error", "warning", "neutral"} else "neutral")
 
     def _register_hotkeys(self) -> None:
         if not sys.platform.startswith("win") or keyboard is None or self._hotkey_registered:

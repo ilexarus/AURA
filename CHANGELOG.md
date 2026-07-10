@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.9.1
+
+- Added a guided three-step command builder as the default creation flow.
+- Added one-click choices for the six most common command types.
+- Added automatic command names and voice phrase suggestions.
+- Added native program, file and folder pickers.
+- Added a direct action-recording path from the easy builder.
+- Kept the complete editor available through an Advanced editor button.
+- Hid automation controls until the user explicitly opens them.
+- Hid retry and continue-on-error controls behind per-step Advanced options.
+- Renamed scenario testing to a clearer Trial run action.
+- Simplified labels and helper text throughout command creation.
+
+## 0.9.0
+
+- Added a searchable command palette with keyboard navigation.
+- Added a searchable, categorized action library.
+- Added live command and step validation with visible error messages.
+- Prevented saving invalid command drafts.
+- Added command context menus, duplication and per-command export.
+- Added full command import and export.
+- Added persistent local activity history and history clearing.
+- Added toast notifications for common operations.
+- Added retry and continue-on-error controls for every action step.
+- Added safe actions for web search, folder creation and clipboard copying.
+- Added single-instance protection and existing-window activation.
+- Added window geometry persistence.
+- Hardened imported shell commands by forcing confirmation.
+- Refined editor layout, action cards, disabled states and keyboard shortcuts.
+- Added validation and persistence regression tests.
+
 ## 0.8.3
 
 - Removed the Favorite switch from the command editor.
